@@ -115,39 +115,39 @@ Post-MVP: 기능 확장         01/11 - 01/24 (14일)
 ### 목표
 실제 아마존에서 상품 정보 30개를 수집하여 콘솔에 출력 (DB 저장 없이)
 
-### 2.1 환경 구성 (12/13, 1일)
-- [ ] `pnpm add puppeteer` 실행
-- [ ] Puppeteer 설치 확인
-- [ ] TypeScript 타입 정의 (`types/index.ts`)
-  - [ ] `ScrapedProductRaw` 인터페이스
-  - [ ] `Product` 인터페이스
-  - [ ] `SourcingType`, `ProductStatus` 타입
+### 2.1 환경 구성 (12/13, 1일) ✅ 완료
+- [x] `pnpm add puppeteer` 실행
+- [x] Puppeteer 설치 확인
+- [x] TypeScript 타입 정의 (`types/index.ts`)
+  - [x] `ScrapedProductRaw` 인터페이스
+  - [x] `Product` 인터페이스
+  - [x] `SourcingType`, `ProductStatus` 타입
 
-### 2.2 URL 처리 유틸리티 (12/13, 0.5일)
-- [ ] `lib/utils/url-processor.ts` 파일 생성
-  - [ ] `processSearchInput()` 함수 구현
-    - [ ] URL 여부 판단 (http로 시작하는지)
-    - [ ] URL인 경우: amazon.com 도메인 검증
-    - [ ] 키워드인 경우: Amazon 검색 URL 생성
-    - [ ] 예외 처리 (빈 값, 잘못된 URL 등)
+### 2.2 URL 처리 유틸리티 (12/13, 0.5일) ✅ 완료
+- [x] `lib/utils/url-processor.ts` 파일 생성
+  - [x] `processSearchInput()` 함수 구현
+    - [x] URL 여부 판단 (http로 시작하는지)
+    - [x] URL인 경우: amazon.com 도메인 검증
+    - [x] 키워드인 경우: Amazon 검색 URL 생성
+    - [x] 예외 처리 (빈 값, 잘못된 URL 등)
 
-### 2.3 아마존 스크래핑 로직 (12/14-12/16, 3일)
-- [ ] `lib/scraper/amazon-scraper.ts` 파일 생성
-  - [ ] Puppeteer 브라우저 초기화
-  - [ ] User-Agent 설정 (Bot Detection 회피)
-  - [ ] 아마존 검색 결과 페이지 접속
-  - [ ] 상품 정보 추출 (ASIN, 제목, 이미지, 가격, URL)
-  - [ ] **페이지네이션 로직 추가** (2-3 페이지, 30개까지)
-  - [ ] 랜덤 딜레이 추가 (1-3초)
-  - [ ] 콘솔에 결과 출력
+### 2.3 아마존 스크래핑 로직 (12/14-12/16, 3일) ✅ 완료
+- [x] `lib/scraper/amazon-scraper.ts` 파일 생성
+  - [x] Puppeteer 브라우저 초기화
+  - [x] User-Agent 설정 (Bot Detection 회피)
+  - [x] 아마존 검색 결과 페이지 접속
+  - [x] 상품 정보 추출 (ASIN, 제목, 이미지, 가격, URL)
+  - [x] **페이지네이션 로직 추가** (2-3 페이지, 30개까지)
+  - [x] 랜덤 딜레이 추가 (1-3초)
+  - [x] 콘솔에 결과 출력
 
-### 2.4 스크래핑 API Route (12/16, 0.5일)
-- [ ] `app/api/scrape/route.ts` 파일 생성
-  - [ ] POST 요청 핸들러
-  - [ ] URL 처리 유틸리티 호출
-  - [ ] 스크래핑 함수 호출
-  - [ ] 결과를 JSON으로 반환
-  - [ ] 에러 핸들링 (Timeout, Network Error 등)
+### 2.4 스크래핑 API Route (12/16, 0.5일) ✅ 완료
+- [x] `app/api/scrape/route.ts` 파일 생성
+  - [x] POST 요청 핸들러
+  - [x] URL 처리 유틸리티 호출
+  - [x] 스크래핑 함수 호출
+  - [x] 결과를 JSON으로 반환
+  - [x] 에러 핸들링 (Timeout, Network Error 등)
 
 ### 2.5 대시보드 연동 (12/17, 0.5일)
 - [ ] 대시보드에서 "수집 시작" 버튼 클릭 시
@@ -172,30 +172,30 @@ Post-MVP: 기능 확장         01/11 - 01/24 (14일)
 ### 목표
 스크래핑된 데이터를 저장할 DB 스키마 설계 및 마이그레이션
 
-### 2.6 Products 테이블 마이그레이션 (12/18, 0.5일)
-- [ ] `supabase/migrations/[timestamp]_create_products_table.sql` 작성
-  - [ ] 기본 필드 (id, user_id, asin, source_url, title, description)
-  - [ ] 이미지 (images TEXT[])
-  - [ ] 옵션 (variants JSONB)
-  - [ ] **US 타입 전용 필드** (amazon_price, margin_rate, selling_price)
-  - [ ] 상태 (status: draft/uploaded/error)
-  - [ ] UNIQUE 제약조건 (asin)
-  - [ ] RLS 비활성화
+### 2.6 Products 테이블 마이그레이션 (12/04, 0.5일) ✅ 완료
+- [x] `supabase/migrations/20241204000000_create_products_table.sql` 작성
+  - [x] 기본 필드 (id, user_id, asin, source_url, title, description)
+  - [x] 이미지 (images TEXT[])
+  - [x] 옵션 (variants JSONB)
+  - [x] **US 타입 전용 필드** (amazon_price, margin_rate, selling_price)
+  - [x] 상태 (status: draft/uploaded/error)
+  - [x] UNIQUE 제약조건 (asin)
+  - [x] RLS 비활성화
 
-### 2.7 Banned Keywords 테이블 마이그레이션 (12/18, 0.5일)
-- [ ] `supabase/migrations/[timestamp]_create_banned_keywords_table.sql` 작성
-  - [ ] 테이블 스키마 (id, keyword, created_at)
-  - [ ] 초기 금지어 데이터 INSERT (Nike, Adidas, Apple 등 15개)
+### 2.7 Banned Keywords 테이블 마이그레이션 (12/04, 0.5일) ✅ 완료
+- [x] `supabase/migrations/20241204000100_create_banned_keywords_table.sql` 작성
+  - [x] 테이블 스키마 (id, keyword, created_at)
+  - [x] 초기 금지어 데이터 INSERT (Nike, Adidas, Apple 등 15개)
 
-### 2.8 마이그레이션 실행
-- [ ] Supabase MCP 또는 Dashboard에서 마이그레이션 실행
-- [ ] 테이블 생성 확인
-- [ ] 초기 데이터 확인
+### 2.8 마이그레이션 실행 ✅ 완료
+- [x] Supabase CLI로 마이그레이션 실행 (`supabase db push`)
+- [x] 테이블 생성 확인
+- [x] 초기 데이터 확인 (금지어 15개)
 
 ### ✅ DB 설계 완료 조건
-- [ ] Supabase에서 `products` 테이블이 생성됨
-- [ ] Supabase에서 `banned_keywords` 테이블이 생성되고 초기 데이터가 있음
-- [ ] TypeScript 타입 정의가 완료되고 import 가능함
+- [x] Supabase에서 `products` 테이블이 생성됨 ✅ **2024-12-04 완료**
+- [x] Supabase에서 `banned_keywords` 테이블이 생성되고 초기 데이터가 있음 ✅ **2024-12-04 완료 (15개)**
+- [x] TypeScript 타입 정의가 완료되고 import 가능함 ✅ **2024-12-04 완료**
 
 ---
 
@@ -483,9 +483,17 @@ US 타입 기준 마진율로 판매가 자동 계산 (MVP 1.0 범위)
 - ✅ Phase 1 완료 (최소 UI 구성)
 - ✅ Phase 0-1 완료 (개발 환경 확인)
 - ✅ Phase 0-2 진행 중 (Shopify 스토어 개설 완료, Access Token 발급 완료)
+- ✅ Phase 2.1 완료 (환경 구성 - Puppeteer 설치 및 타입 정의)
+- ✅ Phase 2.2 완료 (URL 처리 유틸리티)
+- ✅ Phase 2.3 완료 (아마존 스크래핑 로직) **2024-12-04 완료**
+- ✅ Phase 2.4 완료 (스크래핑 API Route + Rate Limiting) **2024-12-04 완료**
+  - ✅ 개발/프로덕션 환경 분리
+  - ✅ Bot Detection 대응 (IP별 요청 제한)
+  - ✅ 프로덕션: 엄격한 제한 (60초 간격, 5분에 3회)
+  - ✅ 개발: 제한 없음 (빠른 테스트)
 - 🔄 Phase 0-3 예정 (PG 연동 시작)
 
-**다음 작업:** Phase 0 나머지 작업 (0-3 PG 연동, 0-4 드롭쉬핑 세팅) 완료 후 Phase 2 본격 시작
+**다음 작업:** Phase 2.5 대시보드 연동 (프론트엔드에서 API 호출)
 
 **MVP 1.0 목표일:** 2026-01-10  
 **v1.1 목표일:** 2026-01-24

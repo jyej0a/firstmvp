@@ -158,6 +158,9 @@ export interface ApiResponse<T = any> {
 
   /** 추가 메시지 (선택사항) */
   message?: string;
+
+  /** Rate Limit 초과 시 재시도까지 대기 시간 (초) */
+  retryAfter?: number;
 }
 
 /**
