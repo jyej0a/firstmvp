@@ -31,6 +31,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { processSearchInput } from "@/lib/utils/url-processor";
 import { scrapeAmazonProducts } from "@/lib/scraper/amazon-scraper";
 import { checkRateLimit, getClientIp } from "@/lib/utils/rate-limiter";
+import { filterByBannedKeywords } from "@/lib/utils/filter-banned-keywords";
 import type { ApiResponse } from "@/types";
 
 /**
@@ -125,21 +126,37 @@ export async function POST(request: NextRequest) {
       console.log(`✅ 스크래핑 완료 (${duration}ms)`);
       console.log(`   수집 상품: ${result.totalScraped}개`);
       console.log(`   수집 페이지: ${result.pagesScraped}페이지`);
+
+      // 5. 금지어 필터링
+      console.log("\n🔍 금지어 필터링 실행...");
+      const filterResult = await filterByBannedKeywords(result.products);
+
+      console.log(`✅ 필터링 완료`);
+      console.log(`   필터링 전: ${filterResult.stats.total}개`);
+      console.log(`   필터링 후: ${filterResult.stats.passed}개`);
+      console.log(`   제거됨: ${filterResult.stats.filteredOut}개`);
       console.groupEnd();
 
-      // 5. 성공 응답
+      // 6. 성공 응답
+      const message =
+        filterResult.stats.filteredOut > 0
+          ? `${filterResult.stats.passed}개 상품 수집 완료 (금지어 필터링: ${filterResult.stats.filteredOut}개 제외)`
+          : `${filterResult.stats.passed}개 상품을 성공적으로 수집했습니다.`;
+
       return NextResponse.json(
         {
           success: true,
           data: {
-            products: result.products,
+            products: filterResult.filteredProducts,
             stats: {
               totalScraped: result.totalScraped,
+              filteredOut: filterResult.stats.filteredOut,
+              finalCount: filterResult.stats.passed,
               duration: result.duration,
               pagesScraped: result.pagesScraped,
             },
           },
-          message: `${result.totalScraped}개 상품을 성공적으로 수집했습니다.`,
+          message,
         } satisfies ApiResponse,
         { status: 200 }
       );
