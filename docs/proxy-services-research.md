@@ -243,3 +243,4 @@ await page.setExtraHTTPHeaders({
 **다음 검토 예정:** v1.1 개발 시작 전 (2026-01-11)
 
 
+
