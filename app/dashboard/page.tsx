@@ -2,25 +2,30 @@
  * @file app/dashboard/page.tsx
  * @description Trend-Hybrid Admin 메인 대시보드
  * 
- * Phase 2.5: 스크래핑 API 연동
+ * Phase 2.13: 대시보드 통합
  * - 키워드/URL 입력창
  * - 수집 시작 버튼 (API 호출)
+ * - 상품 목록 조회 및 표시 (ProductList)
+ * - 체크박스 선택 및 "선택 등록" 버튼
  * - 로딩 상태 표시
  * - 결과/에러 메시지 표시
  */
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import type { ApiResponse, ScrapedProductRaw } from '@/types';
+import ProductList from '@/components/ProductList';
+import type { ApiResponse, ScrapedProductRaw, Product, ShopifyUploadResult } from '@/types';
 
 interface ScrapeResult {
   products: ScrapedProductRaw[];
   stats: {
     totalScraped: number;
     filteredOut?: number;
+    saved?: number;
+    failed?: number;
     finalCount?: number;
     duration: number;
     pagesScraped: number;
@@ -33,11 +38,165 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ScrapeResult | null>(null);
 
+  // Phase 2.13: 상품 목록 상태
+  const [products, setProducts] = useState<Product[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isLoadingProducts, setIsLoadingProducts] = useState(false);
+
+  // Phase 2.21: 일괄 등록 상태
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // Phase 2.13: 페이지 로드 시 상품 목록 자동 조회
+  useEffect(() => {
+    fetchProducts();
+  }, []);
+
+  // 상품 목록 조회 함수
+  const fetchProducts = async () => {
+    console.group('📋 [Dashboard] 상품 목록 조회');
+    setIsLoadingProducts(true);
+
+    try {
+      const response = await fetch('/api/products');
+      const data: ApiResponse<{
+        products: Product[];
+        total: number;
+        limit: number;
+        offset: number;
+      }> = await response.json();
+
+      console.log('📦 조회 결과:', data);
+
+      if (response.ok && data.success && data.data) {
+        setProducts(data.data.products);
+        console.log(`✅ ${data.data.products.length}개 상품 조회 완료`);
+      } else {
+        console.error('❌ 상품 조회 실패:', data.error);
+      }
+    } catch (err) {
+      console.error('❌ 상품 조회 중 오류:', err);
+    } finally {
+      setIsLoadingProducts(false);
+      console.groupEnd();
+    }
+  };
+
+  // Phase 2.16: 마진율 변경 핸들러
+  const handleMarginChange = async (productId: string, newMargin: number) => {
+    console.group('💰 [Dashboard] 마진율 업데이트');
+    console.log(`상품 ID: ${productId}`);
+    console.log(`새 마진율: ${newMargin}%`);
+
+    try {
+      const response = await fetch(`/api/products/${productId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ marginRate: newMargin }),
+      });
+
+      const data: ApiResponse<Product> = await response.json();
+
+      if (response.ok && data.success && data.data) {
+        console.log('✅ 마진율 업데이트 성공');
+        console.log(`   - 새 판매가: $${data.data.sellingPrice.toFixed(2)}`);
+
+        // 로컬 상품 목록 업데이트
+        setProducts((prevProducts) =>
+          prevProducts.map((p) =>
+            p.id === productId
+              ? { ...p, marginRate: newMargin, sellingPrice: data.data!.sellingPrice }
+              : p
+          )
+        );
+      } else {
+        console.error('❌ 마진율 업데이트 실패:', data.error);
+      }
+    } catch (err) {
+      console.error('❌ 마진율 업데이트 중 오류:', err);
+    } finally {
+      console.groupEnd();
+    }
+  };
+
+  // Phase 2.21: Shopify 일괄 등록 핸들러
+  const handleBulkUpload = async () => {
+    console.group('🛒 [Dashboard] Shopify 일괄 등록');
+    console.log(`선택된 상품 개수: ${selectedIds.length}개`);
+
+    // 상태 초기화
+    setIsUploading(true);
+    setUploadMessage(null);
+    setUploadError(null);
+
+    try {
+      console.log('📡 일괄 등록 API 요청 전송 중...');
+      const response = await fetch('/api/shopify/bulk-upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ product_ids: selectedIds }),
+      });
+
+      const data: ApiResponse<ShopifyUploadResult> = await response.json();
+      console.log('📦 API 응답:', data);
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Shopify 등록에 실패했습니다.');
+      }
+
+      // 성공
+      const result = data.data!;
+      console.log('✅ 일괄 등록 완료!');
+      console.log(`   - 총 시도: ${result.total}개`);
+      console.log(`   - 성공: ${result.success}개`);
+      console.log(`   - 실패: ${result.failed}개`);
+
+      if (result.failures.length > 0) {
+        console.log('   - 실패 상세:', result.failures);
+      }
+
+      // 성공 메시지 설정
+      let message = `${result.success}개 상품이 Shopify에 등록되었습니다.`;
+      if (result.failed > 0) {
+        message += ` (${result.failed}개 실패)`;
+      }
+      setUploadMessage(message);
+
+      // 실패 상세 정보를 에러로 표시 (선택 사항)
+      if (result.failures.length > 0) {
+        const errorDetails = result.failures
+          .map((f, idx) => `${idx + 1}. ASIN ${f.asin}: ${f.error}`)
+          .join('\n');
+        console.error('❌ 실패 상세:\n' + errorDetails);
+      }
+
+      // 상품 목록 새로고침
+      console.log('🔄 상품 목록 새로고침 중...');
+      await fetchProducts();
+
+      // 선택 초기화
+      setSelectedIds([]);
+
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다.';
+      console.error('❌ 일괄 등록 실패:', errorMessage);
+      setUploadError(errorMessage);
+    } finally {
+      setIsUploading(false);
+      console.groupEnd();
+    }
+  };
+
   // Phase 2.5: 실제 스크래핑 API 호출
   const handleScrape = async () => {
     console.group('🔍 [Dashboard] 수집 시작');
     console.log('입력값:', searchInput);
-    
+
     // 상태 초기화
     setIsLoading(true);
     setError(null);
@@ -66,12 +225,20 @@ export default function DashboardPage() {
       console.log(`   - 스크래핑된 상품: ${data.data!.stats.totalScraped}개`);
       if (data.data!.stats.filteredOut !== undefined) {
         console.log(`   - 금지어 필터링: ${data.data!.stats.filteredOut}개 제외`);
-        console.log(`   - 최종 상품: ${data.data!.stats.finalCount}개`);
+      }
+      if (data.data!.stats.saved !== undefined) {
+        console.log(`   - DB 저장: ${data.data!.stats.saved}개 성공`);
+      }
+      if (data.data!.stats.failed !== undefined && data.data!.stats.failed > 0) {
+        console.log(`   - DB 저장 실패: ${data.data!.stats.failed}개`);
       }
       console.log(`   - 소요 시간: ${(data.data!.stats.duration / 1000).toFixed(1)}초`);
       console.log(`   - 스크래핑한 페이지: ${data.data!.stats.pagesScraped}개`);
       console.log('   - 상품 목록:', data.data!.products);
-      
+
+      // Phase 2.13: 수집 완료 후 상품 목록 새로고침
+      await fetchProducts();
+
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다.';
       console.error('❌ 스크래핑 실패:', errorMessage);
@@ -175,16 +342,22 @@ export default function DashboardPage() {
         {result && (
           <div className="mb-4 p-3 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-md">
             <p className="text-sm text-green-700 dark:text-green-300">
-              ✅ {result.stats.finalCount ?? result.stats.totalScraped}개 상품을 성공적으로 수집했습니다! 
-              ({(result.stats.duration / 1000).toFixed(1)}초 소요, {result.stats.pagesScraped}페이지)
+              ✅ 스크래핑 완료: {result.stats.totalScraped}개 수집
               {result.stats.filteredOut !== undefined && result.stats.filteredOut > 0 && (
-                <span className="block mt-1">
-                  🚫 금지어 필터링: {result.stats.filteredOut}개 제외
-                </span>
+                <>, {result.stats.filteredOut}개 필터링</>
+              )}
+              {result.stats.saved !== undefined && (
+                <>, {result.stats.saved}개 저장 완료</>
+              )}
+              {result.stats.failed !== undefined && result.stats.failed > 0 && (
+                <> ({result.stats.failed}개 저장 실패)</>
               )}
             </p>
             <p className="text-xs text-green-600 dark:text-green-400 mt-1">
-              💡 콘솔(F12)에서 수집된 상품 정보를 확인하세요.
+              ⏱️  소요 시간: {(result.stats.duration / 1000).toFixed(1)}초 | 📄 페이지: {result.stats.pagesScraped}개
+            </p>
+            <p className="text-xs text-green-600 dark:text-green-400 mt-1">
+              💡 Supabase Dashboard에서 저장된 상품을 확인하세요.
             </p>
           </div>
         )}
@@ -210,61 +383,71 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* 수집 목록 */}
-      <div className="bg-card rounded-lg border">
-        <div className="p-4 border-b">
-          <h2 className="text-lg font-semibold">
-            📋 수집 목록 ({result?.stats.finalCount ?? result?.stats.totalScraped ?? 0} items)
-          </h2>
-        </div>
-        
-        {/* 결과가 없을 때 */}
-        {!result && (
-          <div className="p-12 text-center text-muted-foreground">
-            <p className="text-lg mb-2">수집된 상품이 없습니다</p>
-            <p className="text-sm">
-              키워드를 입력하고 "수집 시작" 버튼을 클릭하세요
-            </p>
-          </div>
-        )}
-
-        {/* 결과가 있을 때 - 간단한 리스트 표시 (Phase 2.5: 콘솔 출력 위주) */}
-        {result && result.products.length > 0 && (
-          <div className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {result.products.slice(0, 6).map((product) => (
-                <div 
-                  key={product.asin} 
-                  className="p-4 border rounded-lg hover:shadow-md transition-shadow"
-                >
-                  {product.images[0] && (
-                    <img 
-                      src={product.images[0]} 
-                      alt={product.title}
-                      className="w-full h-40 object-cover rounded mb-3"
-                    />
-                  )}
-                  <h3 className="font-medium text-sm line-clamp-2 mb-2">
-                    {product.title}
-                  </h3>
-                  <div className="flex justify-between items-center text-sm text-muted-foreground">
-                    <span className="font-mono">{product.asin}</span>
-                    <span className="font-semibold text-primary">
-                      ${product.amazonPrice.toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-              ))}
+      {/* Phase 2.21: 선택 등록 버튼 */}
+      {products.length > 0 && (
+        <div className="mb-6 p-4 bg-card rounded-lg border">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-sm text-muted-foreground">
+              {selectedIds.length > 0 ? (
+                <span>
+                  <span className="font-bold text-primary">{selectedIds.length}개</span> 상품 선택됨
+                </span>
+              ) : (
+                <span>상품을 선택하고 &quot;선택 등록&quot; 버튼을 클릭하세요</span>
+              )}
             </div>
-            
-            {result.products.length > 6 && (
-              <p className="text-center text-sm text-muted-foreground mt-4">
-                ... 외 {result.products.length - 6}개 상품 (콘솔에서 전체 확인 가능)
-              </p>
-            )}
+            <Button
+              onClick={handleBulkUpload}
+              disabled={selectedIds.length === 0 || isUploading}
+              className="px-6"
+            >
+              {isUploading ? '등록 중...' : `선택 등록 (${selectedIds.length})`}
+            </Button>
           </div>
-        )}
-      </div>
+
+          {/* 업로드 진행 중 메시지 */}
+          {isUploading && (
+            <div className="p-3 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-md">
+              <p className="text-sm text-blue-700 dark:text-blue-300">
+                ⏳ Shopify에 상품을 등록하고 있습니다. 잠시만 기다려주세요...
+              </p>
+              <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                💡 상품이 많을수록 시간이 더 걸릴 수 있습니다.
+              </p>
+            </div>
+          )}
+
+          {/* 업로드 성공 메시지 */}
+          {uploadMessage && !isUploading && (
+            <div className="p-3 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-md">
+              <p className="text-sm text-green-700 dark:text-green-300">
+                ✅ {uploadMessage}
+              </p>
+              <p className="text-xs text-green-600 dark:text-green-400 mt-1">
+                💡 Shopify Dashboard에서 등록된 상품을 확인하세요.
+              </p>
+            </div>
+          )}
+
+          {/* 업로드 에러 메시지 */}
+          {uploadError && !isUploading && (
+            <div className="p-3 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-md">
+              <p className="text-sm text-red-700 dark:text-red-300">
+                ❌ {uploadError}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Phase 2.13: ProductList 컴포넌트 통합 */}
+      <ProductList
+        products={products}
+        selectedIds={selectedIds}
+        onSelectionChange={setSelectedIds}
+        onMarginChange={handleMarginChange}
+        isLoading={isLoadingProducts}
+      />
     </div>
   );
 }

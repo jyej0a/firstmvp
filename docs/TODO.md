@@ -406,14 +406,16 @@ US 타입 기준 마진율로 판매가 자동 계산 (MVP 1.0 범위)
   - [x] 환경변수 유효성 검증
   - [x] 에러별 문제 해결 가이드 제공
 
-### 2.19 Shopify API 클라이언트 (12/26-12/27, 1.5일)
-- [ ] `lib/shopify/client.ts` 생성
-  - [ ] `createProduct()` 함수
-    - [ ] 상품 생성 API 호출
-    - [ ] 이미지 URL 배열 전달
-  - [ ] `uploadProductImages()` 함수 (필요시)
-  - [ ] 에러 핸들링 (Rate Limit, Network Error 등)
-  - [ ] 재시도 로직 (최대 3회)
+### 2.19 Shopify API 클라이언트 (12/26-12/27, 1.5일) ✅ 완료 (2024-12-09)
+- [x] `lib/shopify/client.ts` 생성
+  - [x] `createProduct()` 함수
+    - [x] 상품 생성 API 호출
+    - [x] 이미지 URL 배열 전달 (최대 10개)
+  - [x] `uploadProductImages()` 함수 (필요시) - createProduct에 통합
+  - [x] 에러 핸들링 (Rate Limit, Network Error 등)
+  - [x] 재시도 로직 (최대 3회, 지수 백오프)
+- [x] `types/shopify.ts` 생성 (Shopify API 타입 정의)
+- [x] `lib/shopify/__tests__/client.test.ts` 생성 (단위 테스트)
 
 ### 2.20 일괄 등록 API (12/28, 1.5일)
 - [ ] `app/api/shopify/bulk-upload/route.ts` 생성
@@ -635,9 +637,16 @@ US 타입 기준 마진율로 판매가 자동 계산 (MVP 1.0 범위)
 - ✅ **Phase 2.18 완료** (Shopify 환경 변수 설정) **2024-12-09**
   - ✅ .env 파일에 Shopify 정보 추가 (URL, Access Token, API Version)
   - ✅ 연결 테스트 API 생성 (/api/shopify/test)
+- ✅ **Phase 2.19 완료** (Shopify API 클라이언트) **2024-12-09**
+  - ✅ lib/shopify/client.ts 생성 (createProduct 함수)
+  - ✅ types/shopify.ts 생성 (Shopify API 타입 정의)
+  - ✅ 에러 핸들링 및 재시도 로직 (지수 백오프, 최대 3회)
+  - ✅ Rate Limit 대응 (429 에러 자동 재시도)
+  - ✅ 이미지 최대 10개 지원
+  - ✅ 단위 테스트 작성 (lib/shopify/__tests__/client.test.ts)
 - 🔄 Phase 0-3 예정 (PG 연동 시작)
 
-**다음 작업:** Phase 2.19 Shopify API 클라이언트 구현 (lib/shopify/client.ts 생성)
+**다음 작업:** Phase 2.20 일괄 등록 API 구현 (app/api/shopify/bulk-upload/route.ts 생성)
 
 **MVP 1.0 목표일:** 2026-01-10  
 **v1.1 목표일:** 2026-01-24

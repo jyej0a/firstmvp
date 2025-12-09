@@ -114,6 +114,12 @@ async function initPage(
   await page.setUserAgent(USER_AGENT);
   console.log("✅ User-Agent 설정 완료");
 
+  // 언어 설정 (영어로 고정)
+  await page.setExtraHTTPHeaders({
+    "Accept-Language": "en-US,en;q=0.9",
+  });
+  console.log("✅ 언어 설정 완료 (영어)");
+
   // 타임아웃 설정
   page.setDefaultNavigationTimeout(timeout);
   page.setDefaultTimeout(timeout);
@@ -155,7 +161,7 @@ async function extractProductsFromPage(
     });
   } catch (error) {
     console.warn("⚠️  기본 selector로 상품을 찾을 수 없습니다. 대체 selector 시도 중...");
-    
+
     // 대체 selector 시도
     try {
       await page.waitForSelector('.s-result-item[data-asin]', {
@@ -163,13 +169,13 @@ async function extractProductsFromPage(
       });
     } catch (fallbackError) {
       console.error("❌ 상품 컨테이너를 찾을 수 없습니다.");
-      
+
       // 페이지 HTML 일부 출력
       const bodyHTML = await page.evaluate(() => {
         return document.body.innerHTML.substring(0, 500);
       });
       console.log("📄 페이지 HTML (처음 500자):", bodyHTML);
-      
+
       throw new Error("상품 컨테이너를 찾을 수 없습니다. Amazon 페이지 구조가 변경되었을 수 있습니다.");
     }
   }
@@ -206,10 +212,10 @@ async function extractProductsFromPage(
     productElements.forEach((element, index) => {
       try {
         // ASIN 추출 (여러 방법 시도)
-        const asin = 
-          element.getAttribute("data-asin") || 
+        const asin =
+          element.getAttribute("data-asin") ||
           element.getAttribute("data-uuid") || "";
-        
+
         if (!asin || asin.length < 10) return; // 유효하지 않은 ASIN 스킵
 
         // 제목 추출 (여러 selector 시도)
@@ -219,7 +225,7 @@ async function extractProductsFromPage(
           ".s-title-instructions-style h2 a span",
           "h2.s-line-clamp-2 a span",
         ];
-        
+
         let title = "";
         for (const sel of titleSelectors) {
           const titleElement = element.querySelector(sel);
@@ -228,20 +234,64 @@ async function extractProductsFromPage(
             break;
           }
         }
-        
+
         if (!title) return; // 제목이 없으면 스킵
 
-        // 이미지 추출
-        const imageElement = element.querySelector("img.s-image, img[data-image-index='0']");
-        const imageUrl = imageElement?.getAttribute("src") || "";
-        const images = imageUrl ? [imageUrl] : [];
+        // 이미지 추출 (여러 이미지 수집)
+        const images: string[] = [];
 
-        // 가격 추출 (숨겨진 가격 텍스트)
-        const priceElement = element.querySelector(".a-price .a-offscreen");
-        const priceText = priceElement?.textContent?.trim() || "";
-        const amazonPrice = parseFloat(
-          priceText.replace(/[^0-9.]/g, "") || "0"
-        );
+        // 1. 메인 썸네일 이미지
+        const mainImage = element.querySelector("img.s-image, img[data-image-index='0']");
+        if (mainImage?.getAttribute("src")) {
+          images.push(mainImage.getAttribute("src")!);
+        }
+
+        // 2. srcset에서 고해상도 이미지 추출 (있는 경우)
+        const srcset = mainImage?.getAttribute("srcset");
+        if (srcset) {
+          const srcsetUrls = srcset.split(",").map((item) => {
+            const parts = item.trim().split(" ");
+            return parts[0]; // URL만 추출
+          });
+          // 중복 제거하고 추가
+          srcsetUrls.forEach((url) => {
+            if (url && !images.includes(url)) {
+              images.push(url);
+            }
+          });
+        }
+
+        // 3. 추가 이미지 (data-image-index 속성이 있는 경우)
+        const additionalImages = element.querySelectorAll("img[data-image-index]");
+        additionalImages.forEach((img) => {
+          const src = img.getAttribute("src");
+          if (src && !images.includes(src)) {
+            images.push(src);
+          }
+        });
+
+        // 최소 1개의 이미지는 있어야 함
+        if (images.length === 0) return;
+
+        // 가격 추출 (여러 selector 시도)
+        const priceSelectors = [
+          ".a-price .a-offscreen",           // 주요 가격 (숨겨진 텍스트)
+          ".a-price-whole",                  // 정수 부분
+          "span.a-price span[aria-hidden='true']", // 대체 가격
+        ];
+
+        let priceText = "";
+        for (const sel of priceSelectors) {
+          const elem = element.querySelector(sel);
+          if (elem?.textContent) {
+            priceText = elem.textContent.trim();
+            break;
+          }
+        }
+
+        // 가격 파싱 (숫자와 소수점만 추출)
+        const cleanPrice = priceText.replace(/[^0-9.]/g, "");
+        const amazonPrice = cleanPrice ? parseFloat(cleanPrice) : 0;
 
         // URL 추출
         const linkElement = element.querySelector("h2 a, a.s-link-style");
@@ -250,8 +300,8 @@ async function extractProductsFromPage(
           ? `https://www.amazon.com${relativeUrl}`
           : "";
 
-        // 유효성 검증
-        if (asin && title && sourceUrl && images.length > 0) {
+        // 유효성 검증 (가격이 0보다 커야 함)
+        if (asin && title && sourceUrl && images.length > 0 && amazonPrice > 0) {
           scrapedProducts.push({
             asin,
             title,
@@ -259,10 +309,13 @@ async function extractProductsFromPage(
             amazonPrice,
             sourceUrl,
           });
-          
+
           if (verboseMode && index < 3) {
-            console.log(`  ${index + 1}. ${title} (${asin})`);
+            console.log(`  ${index + 1}. ${title} (${asin}) - $${amazonPrice.toFixed(2)}`);
           }
+        } else if (verboseMode && asin && title && amazonPrice <= 0) {
+          // 가격이 0 이하인 경우 디버그 로그
+          console.warn(`  ⚠️  가격 누락으로 건너뜀: ${title.substring(0, 50)}... (${asin})`);
         }
       } catch (error) {
         console.error("상품 추출 중 에러:", error);

@@ -32,6 +32,7 @@ import { processSearchInput } from "@/lib/utils/url-processor";
 import { scrapeAmazonProducts } from "@/lib/scraper/amazon-scraper";
 import { checkRateLimit, getClientIp } from "@/lib/utils/rate-limiter";
 import { filterByBannedKeywords } from "@/lib/utils/filter-banned-keywords";
+import { saveProductsToDatabase } from "@/lib/utils/save-products";
 import type { ApiResponse } from "@/types";
 
 /**
@@ -135,13 +136,39 @@ export async function POST(request: NextRequest) {
       console.log(`   필터링 전: ${filterResult.stats.total}개`);
       console.log(`   필터링 후: ${filterResult.stats.passed}개`);
       console.log(`   제거됨: ${filterResult.stats.filteredOut}개`);
+
+      // 6. DB 저장
+      console.log("\n💾 DB 저장 실행...");
+      const saveResult = await saveProductsToDatabase(
+        filterResult.filteredProducts
+      );
+
+      console.log(`✅ DB 저장 완료`);
+      console.log(`   저장 성공: ${saveResult.saved}개`);
+      console.log(`   저장 실패: ${saveResult.failed}개`);
       console.groupEnd();
 
-      // 6. 성공 응답
-      const message =
-        filterResult.stats.filteredOut > 0
-          ? `${filterResult.stats.passed}개 상품 수집 완료 (금지어 필터링: ${filterResult.stats.filteredOut}개 제외)`
-          : `${filterResult.stats.passed}개 상품을 성공적으로 수집했습니다.`;
+      // 7. 성공 응답
+      const message = (() => {
+        const parts: string[] = [];
+
+        // 수집 결과
+        parts.push(`${result.totalScraped}개 스크래핑`);
+
+        // 필터링 결과
+        if (filterResult.stats.filteredOut > 0) {
+          parts.push(`${filterResult.stats.filteredOut}개 필터링`);
+        }
+
+        // 저장 결과
+        parts.push(`${saveResult.saved}개 저장 완료`);
+
+        if (saveResult.failed > 0) {
+          parts.push(`${saveResult.failed}개 저장 실패`);
+        }
+
+        return parts.join(", ");
+      })();
 
       return NextResponse.json(
         {
@@ -151,7 +178,9 @@ export async function POST(request: NextRequest) {
             stats: {
               totalScraped: result.totalScraped,
               filteredOut: filterResult.stats.filteredOut,
-              finalCount: filterResult.stats.passed,
+              saved: saveResult.saved,
+              failed: saveResult.failed,
+              finalCount: saveResult.saved,
               duration: result.duration,
               pagesScraped: result.pagesScraped,
             },

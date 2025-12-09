@@ -134,13 +134,22 @@ export interface ScrapingStats {
   totalScraped: number;
 
   /** 금지어 필터링으로 제거된 개수 */
-  filteredOut: number;
+  filteredOut?: number;
 
   /** DB에 저장된 상품 개수 */
-  saved: number;
+  saved?: number;
 
   /** 저장 실패한 개수 */
-  failed: number;
+  failed?: number;
+
+  /** 최종 상품 개수 (저장 성공한 개수) */
+  finalCount?: number;
+
+  /** 스크래핑 소요 시간 (ms) */
+  duration?: number;
+
+  /** 수집한 페이지 개수 */
+  pagesScraped?: number;
 }
 
 /**
