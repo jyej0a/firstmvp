@@ -387,22 +387,22 @@ export default function DashboardPage() {
       {products.length > 0 && (
         <div className="mb-6 p-4 bg-card rounded-lg border">
           <div className="flex items-center justify-between mb-3">
-            <div className="text-sm text-muted-foreground">
-              {selectedIds.length > 0 ? (
-                <span>
-                  <span className="font-bold text-primary">{selectedIds.length}개</span> 상품 선택됨
-                </span>
-              ) : (
-                <span>상품을 선택하고 &quot;선택 등록&quot; 버튼을 클릭하세요</span>
-              )}
-            </div>
-            <Button
+          <div className="text-sm text-muted-foreground">
+            {selectedIds.length > 0 ? (
+              <span>
+                <span className="font-bold text-primary">{selectedIds.length}개</span> 상품 선택됨
+              </span>
+            ) : (
+              <span>상품을 선택하고 &quot;선택 등록&quot; 버튼을 클릭하세요</span>
+            )}
+          </div>
+          <Button
               onClick={handleBulkUpload}
               disabled={selectedIds.length === 0 || isUploading}
-              className="px-6"
-            >
+            className="px-6"
+          >
               {isUploading ? '등록 중...' : `선택 등록 (${selectedIds.length})`}
-            </Button>
+          </Button>
           </div>
 
           {/* 업로드 진행 중 메시지 */}
