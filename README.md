@@ -10,7 +10,7 @@
     <img src="https://img.shields.io/badge/-Supabase-3FCF8E?style=for-the-badge&logo=supabase&logoColor=white" alt="supabase" />
   </div>
 
-  <h1 align="center">SaaS 템플릿</h1>
+  <h1 align="center">V1</h1>
   <h3 align="center">Next.js 15 + Clerk + Supabase</h3>
 
   <p align="center">

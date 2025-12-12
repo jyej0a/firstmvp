@@ -250,7 +250,7 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-7xl">
+    <div className="container mx-auto px-4 py-8 max-w-7xl bg-terminal min-h-screen">
       {/* 헤더 */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold mb-2">Trend-Hybrid Admin</h1>
@@ -260,7 +260,7 @@ export default function DashboardPage() {
       </div>
 
       {/* 🚀 Quick Links (트렌드 숏컷) */}
-      <div className="mb-6 p-4 bg-card rounded-lg border">
+      <div className="mb-6 p-4 bg-card rounded-none border">
         <h2 className="text-sm font-semibold mb-3 text-muted-foreground">
           🚀 TREND SHORTCUTS
         </h2>
@@ -297,7 +297,7 @@ export default function DashboardPage() {
       </div>
 
       {/* 메인 액션: 키워드 또는 URL 입력 & 일괄 수집 */}
-      <div className="mb-6 p-6 bg-card rounded-lg border">
+      <div className="mb-6 p-6 bg-card rounded-none border">
         <h2 className="text-lg font-semibold mb-4">
           키워드 또는 URL 입력 & 일괄 수집
         </h2>
@@ -322,7 +322,7 @@ export default function DashboardPage() {
 
         {/* 로딩 상태 표시 */}
         {isLoading && (
-          <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-md">
+          <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-none">
             <p className="text-sm text-blue-700 dark:text-blue-300">
               ⏳ 아마존에서 상품을 수집하고 있습니다...
             </p>
@@ -331,7 +331,7 @@ export default function DashboardPage() {
 
         {/* 에러 메시지 표시 */}
         {error && (
-          <div className="mb-4 p-3 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-md">
+          <div className="mb-4 p-3 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-none">
             <p className="text-sm text-red-700 dark:text-red-300">
               ❌ {error}
             </p>
@@ -340,7 +340,7 @@ export default function DashboardPage() {
 
         {/* 성공 메시지 표시 */}
         {result && (
-          <div className="mb-4 p-3 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-md">
+          <div className="mb-4 p-3 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-none">
             <p className="text-sm text-green-700 dark:text-green-300">
               ✅ 스크래핑 완료: {result.stats.totalScraped}개 수집
               {result.stats.filteredOut !== undefined && result.stats.filteredOut > 0 && (
@@ -385,7 +385,7 @@ export default function DashboardPage() {
 
       {/* Phase 2.21: 선택 등록 버튼 */}
       {products.length > 0 && (
-        <div className="mb-6 p-4 bg-card rounded-lg border">
+        <div className="mb-6 p-4 bg-card rounded-none border">
           <div className="flex items-center justify-between mb-3">
           <div className="text-sm text-muted-foreground">
             {selectedIds.length > 0 ? (
@@ -407,7 +407,7 @@ export default function DashboardPage() {
 
           {/* 업로드 진행 중 메시지 */}
           {isUploading && (
-            <div className="p-3 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-md">
+            <div className="p-3 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-none">
               <p className="text-sm text-blue-700 dark:text-blue-300">
                 ⏳ Shopify에 상품을 등록하고 있습니다. 잠시만 기다려주세요...
               </p>
@@ -419,7 +419,7 @@ export default function DashboardPage() {
 
           {/* 업로드 성공 메시지 */}
           {uploadMessage && !isUploading && (
-            <div className="p-3 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-md">
+            <div className="p-3 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-none">
               <p className="text-sm text-green-700 dark:text-green-300">
                 ✅ {uploadMessage}
               </p>
@@ -431,7 +431,7 @@ export default function DashboardPage() {
 
           {/* 업로드 에러 메시지 */}
           {uploadError && !isUploading && (
-            <div className="p-3 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-md">
+            <div className="p-3 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-none">
               <p className="text-sm text-red-700 dark:text-red-300">
                 ❌ {uploadError}
               </p>

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { koKR } from "@clerk/localizations";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, JetBrains_Mono, Press_Start_2P } from "next/font/google";
 
 import Navbar from "@/components/Navbar";
 import { SyncUserProvider } from "@/components/providers/sync-user-provider";
@@ -17,8 +17,19 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const mono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-mono",
+});
+
+const pixel = Press_Start_2P({
+  weight: "400",
+  subsets: ["latin"],
+  variable: "--font-pixel",
+});
+
 export const metadata: Metadata = {
-  title: "SaaS 템플릿",
+  title: "V1",
   description: "Next.js + Clerk + Supabase 보일러플레이트",
 };
 
@@ -31,7 +42,7 @@ export default function RootLayout({
     <ClerkProvider localization={koKR}>
       <html lang="ko">
         <body
-          className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+          className={`${geistSans.variable} ${geistMono.variable} ${mono.variable} ${pixel.variable} font-mono antialiased`}
         >
           <SyncUserProvider>
             <Navbar />

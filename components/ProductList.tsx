@@ -65,7 +65,7 @@ function StatusBadge({ status }: { status: Product["status"] }) {
 
   return (
     <span
-      className={`inline-flex items-center px-2 py-1 text-xs font-medium rounded ${config.className}`}
+      className={`inline-flex items-center px-2 py-1 text-xs font-medium rounded-none ${config.className}`}
     >
       {config.label}
     </span>
@@ -184,7 +184,7 @@ export default function ProductList({
   // 빈 리스트 상태
   if (!isLoading && products.length === 0) {
     return (
-      <div className="bg-card rounded-lg border">
+      <div className="bg-card rounded-none border">
         <div className="p-4 border-b">
           <h2 className="text-lg font-semibold">
             📋 수집 목록 (0 items)
@@ -201,7 +201,7 @@ export default function ProductList({
   }
 
   return (
-    <div className="bg-card rounded-lg border">
+    <div className="bg-card rounded-none border">
       {/* 헤더: 타이틀 및 선택 개수 */}
       <div className="p-4 border-b flex items-center justify-between">
         <h2 className="text-lg font-semibold">
@@ -274,12 +274,12 @@ export default function ProductList({
                         src={product.images[0]}
                         alt={product.title}
                         fill
-                        className="object-cover rounded"
+                        className="object-cover rounded-none"
                         sizes="64px"
                       />
                     </div>
                   ) : (
-                    <div className="w-16 h-16 bg-muted rounded flex items-center justify-center">
+                    <div className="w-16 h-16 bg-muted rounded-none flex items-center justify-center">
                       <span className="text-xs text-muted-foreground">
                         No Image
                       </span>
@@ -296,7 +296,7 @@ export default function ProductList({
 
                 {/* ASIN */}
                 <td className="p-3">
-                  <code className="text-xs bg-muted px-2 py-1 rounded">
+                  <code className="text-xs bg-muted px-2 py-1 rounded-none">
                     {product.asin}
                   </code>
                 </td>
@@ -323,7 +323,7 @@ export default function ProductList({
                       onBlur={(e) =>
                         handleMarginBlur(product.id, parseFloat(e.target.value))
                       }
-                      className="w-16 px-2 py-1 text-sm text-center border rounded focus:outline-none focus:ring-2 focus:ring-primary"
+                      className="w-16 px-2 py-1 text-sm text-center border rounded-none focus:outline-none focus:ring-2 focus:ring-primary"
                       aria-label={`${product.title} 마진율`}
                     />
                     <span className="text-sm text-muted-foreground">%</span>
