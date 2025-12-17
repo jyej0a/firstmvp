@@ -31,6 +31,14 @@ const pixel = Press_Start_2P({
 export const metadata: Metadata = {
   title: "V1",
   description: "Next.js + Clerk + Supabase 보일러플레이트",
+  icons: {
+    icon: [
+      { url: "/favicon.png", type: "image/png" },
+      { url: "/icon.png", type: "image/png" },
+    ],
+    shortcut: "/favicon.png",
+    apple: "/favicon.png",
+  },
 };
 
 export default function RootLayout({

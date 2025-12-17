@@ -60,6 +60,7 @@ function calculateSellingPrice(
  * 상품 데이터를 DB에 저장하는 메인 함수
  *
  * @param products - 저장할 상품 배열 (필터링된 상품)
+ * @param userId - 사용자 ID (선택사항, 제공되지 않으면 auth() 사용)
  * @returns 저장 결과 (성공/실패 통계)
  *
  * @example
@@ -67,21 +68,26 @@ function calculateSellingPrice(
  * console.log(`${result.saved}개 저장 완료, ${result.failed}개 실패`);
  */
 export async function saveProductsToDatabase(
-  products: ScrapedProductRaw[]
+  products: ScrapedProductRaw[],
+  userId?: string
 ): Promise<SaveResult> {
   console.group("💾 DB 저장 시작");
   const startTime = Date.now();
 
-  // 1. Clerk 사용자 인증
-  const { userId } = await auth();
+  // 1. 사용자 ID 확인
+  let finalUserId = userId;
+  if (!finalUserId) {
+    const authResult = await auth();
+    finalUserId = authResult.userId;
 
-  if (!userId) {
-    console.error("❌ 인증되지 않은 사용자");
-    console.groupEnd();
-    throw new Error("User not authenticated");
+    if (!finalUserId) {
+      console.error("❌ 인증되지 않은 사용자");
+      console.groupEnd();
+      throw new Error("User not authenticated");
+    }
   }
 
-  console.log(`👤 사용자 ID: ${userId}`);
+  console.log(`👤 사용자 ID: ${finalUserId}`);
   console.log(`📊 저장 대상: ${products.length}개 상품`);
 
   // 2. Service Role 클라이언트 생성
@@ -122,7 +128,7 @@ export async function saveProductsToDatabase(
       // DB에 저장 (UPSERT)
       const { error } = await supabase.from("products").upsert(
         {
-          user_id: userId,
+          user_id: finalUserId,
           asin: product.asin,
           source_url: product.sourceUrl,
           title: product.title,

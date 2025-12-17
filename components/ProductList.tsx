@@ -168,7 +168,7 @@ export default function ProductList({
 
       console.log(`💰 가격 재계산: ${product.title.substring(0, 30)}...`);
       console.log(`   마진율: ${marginValue}%`);
-      console.log(`   판매가: $${newPrice.toFixed(2)}`);
+      console.log(`   판매가: $${newPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
     } catch (error) {
       console.error("가격 계산 오류:", error);
     }
@@ -187,7 +187,7 @@ export default function ProductList({
       <div className="bg-card rounded-none border">
         <div className="p-4 border-b">
           <h2 className="text-lg font-semibold">
-            📋 수집 목록 (0 items)
+            📋 List (0 items)
           </h2>
         </div>
         <div className="p-12 text-center text-muted-foreground">
@@ -205,7 +205,7 @@ export default function ProductList({
       {/* 헤더: 타이틀 및 선택 개수 */}
       <div className="p-4 border-b flex items-center justify-between">
         <h2 className="text-lg font-semibold">
-          📋 수집 목록 ({products.length} items)
+          📋 List ({products.length} items)
         </h2>
         {selectedIds.length > 0 && (
           <span className="text-sm text-muted-foreground">
@@ -304,7 +304,7 @@ export default function ProductList({
                 {/* 아마존 가격 */}
                 <td className="p-3 text-right">
                   <span className="font-mono text-sm">
-                    ${product.amazonPrice.toFixed(2)}
+                    ${product.amazonPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </td>
 
@@ -333,7 +333,7 @@ export default function ProductList({
                 {/* 판매가 (실시간 계산) */}
                 <td className="p-3 text-right">
                   <span className="font-mono text-sm font-semibold text-green-600 dark:text-green-400">
-                    ${(localPrices[product.id] || product.sellingPrice).toFixed(2)}
+                    ${(localPrices[product.id] || product.sellingPrice).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </td>
 

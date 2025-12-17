@@ -17,6 +17,7 @@ import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import ProductList from '@/components/ProductList';
+import ScrapingProgress from '@/components/ScrapingProgress';
 import type { ApiResponse, ScrapedProductRaw, Product, ShopifyUploadResult } from '@/types';
 
 interface ScrapeResult {
@@ -37,6 +38,9 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ScrapeResult | null>(null);
+  
+  // 순차 처리 Job ID 상태
+  const [currentJobId, setCurrentJobId] = useState<string | null>(null);
 
   // Phase 2.13: 상품 목록 상태
   const [products, setProducts] = useState<Product[]>([]);
@@ -102,7 +106,7 @@ export default function DashboardPage() {
 
       if (response.ok && data.success && data.data) {
         console.log('✅ 마진율 업데이트 성공');
-        console.log(`   - 새 판매가: $${data.data.sellingPrice.toFixed(2)}`);
+        console.log(`   - 새 판매가: $${data.data.sellingPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 
         // 로컬 상품 목록 업데이트
         setProducts((prevProducts) =>
@@ -192,15 +196,16 @@ export default function DashboardPage() {
     }
   };
 
-  // Phase 2.5: 실제 스크래핑 API 호출
+  // 순차 처리 스크래핑 시작
   const handleScrape = async () => {
-    console.group('🔍 [Dashboard] 수집 시작');
+    console.group('🔍 [Dashboard] 순차 처리 수집 시작');
     console.log('입력값:', searchInput);
 
     // 상태 초기화
     setIsLoading(true);
     setError(null);
     setResult(null);
+    setCurrentJobId(null);
 
     try {
       console.log('📡 API 요청 전송 중...');
@@ -209,60 +214,64 @@ export default function DashboardPage() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ searchInput }),
+        body: JSON.stringify({ 
+          searchInput,
+          totalTarget: 1000, // 하루 최대 1000개
+        }),
       });
 
-      const data: ApiResponse<ScrapeResult> = await response.json();
+      const data: ApiResponse<{ jobId: string; message: string }> = await response.json();
       console.log('📦 API 응답:', data);
 
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || '스크래핑에 실패했습니다.');
+      if (!response.ok || !data.success || !data.data) {
+        throw new Error(data.error || '스크래핑 작업 시작에 실패했습니다.');
       }
 
-      // 성공
-      setResult(data.data!);
-      console.log('✅ 스크래핑 성공!');
-      console.log(`   - 스크래핑된 상품: ${data.data!.stats.totalScraped}개`);
-      if (data.data!.stats.filteredOut !== undefined) {
-        console.log(`   - 금지어 필터링: ${data.data!.stats.filteredOut}개 제외`);
-      }
-      if (data.data!.stats.saved !== undefined) {
-        console.log(`   - DB 저장: ${data.data!.stats.saved}개 성공`);
-      }
-      if (data.data!.stats.failed !== undefined && data.data!.stats.failed > 0) {
-        console.log(`   - DB 저장 실패: ${data.data!.stats.failed}개`);
-      }
-      console.log(`   - 소요 시간: ${(data.data!.stats.duration / 1000).toFixed(1)}초`);
-      console.log(`   - 스크래핑한 페이지: ${data.data!.stats.pagesScraped}개`);
-      console.log('   - 상품 목록:', data.data!.products);
+      // Job ID 저장
+      setCurrentJobId(data.data.jobId);
+      console.log('✅ 순차 처리 작업 시작됨!');
+      console.log(`   - Job ID: ${data.data.jobId}`);
+      console.log(`   - 메시지: ${data.data.message}`);
 
-      // Phase 2.13: 수집 완료 후 상품 목록 새로고침
-      await fetchProducts();
+      // 상품 목록 주기적 새로고침 (진행 중)
+      const refreshInterval = setInterval(() => {
+        fetchProducts();
+      }, 10000); // 10초마다 새로고침
+
+      // 완료 시 인터벌 정리 (나중에 ScrapingProgress에서 처리)
 
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다.';
-      console.error('❌ 스크래핑 실패:', errorMessage);
+      console.error('❌ 스크래핑 작업 시작 실패:', errorMessage);
       setError(errorMessage);
-    } finally {
       setIsLoading(false);
+    } finally {
       console.groupEnd();
     }
+  };
+
+  // 작업 완료 시 콜백
+  const handleJobComplete = () => {
+    console.log('✅ 순차 처리 작업 완료');
+    setIsLoading(false);
+    // 상품 목록 최종 새로고침
+    fetchProducts();
   };
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-7xl bg-terminal min-h-screen">
       {/* 헤더 */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">Trend-Hybrid Admin</h1>
+        <h1 className="text-3xl font-bold mb-2">na-zak-zon</h1>
         <p className="text-muted-foreground">
-          트렌드 상품 수집 및 등록 시스템
+            
         </p>
       </div>
 
       {/* 🚀 Quick Links (트렌드 숏컷) */}
       <div className="mb-6 p-4 bg-card rounded-none border">
         <h2 className="text-sm font-semibold mb-3 text-muted-foreground">
-          🚀 TREND SHORTCUTS
+           TREND SHORTCUTS
         </h2>
         <div className="flex gap-2 flex-wrap">
           <Button
@@ -299,7 +308,7 @@ export default function DashboardPage() {
       {/* 메인 액션: 키워드 또는 URL 입력 & 일괄 수집 */}
       <div className="mb-6 p-6 bg-card rounded-none border">
         <h2 className="text-lg font-semibold mb-4">
-          키워드 또는 URL 입력 & 일괄 수집
+          Enter URL or Keyword
         </h2>
 
         <div className="flex gap-2 mb-4">
@@ -320,12 +329,14 @@ export default function DashboardPage() {
           </Button>
         </div>
 
-        {/* 로딩 상태 표시 */}
-        {isLoading && (
-          <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-none">
-            <p className="text-sm text-blue-700 dark:text-blue-300">
-              ⏳ 아마존에서 상품을 수집하고 있습니다...
-            </p>
+        {/* 순차 처리 진행 상황 표시 */}
+        {currentJobId && (
+          <div className="mb-4">
+            <ScrapingProgress
+              jobId={currentJobId}
+              pollingInterval={5000}
+              onComplete={handleJobComplete}
+            />
           </div>
         )}
 
@@ -334,30 +345,6 @@ export default function DashboardPage() {
           <div className="mb-4 p-3 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-none">
             <p className="text-sm text-red-700 dark:text-red-300">
               ❌ {error}
-            </p>
-          </div>
-        )}
-
-        {/* 성공 메시지 표시 */}
-        {result && (
-          <div className="mb-4 p-3 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-none">
-            <p className="text-sm text-green-700 dark:text-green-300">
-              ✅ 스크래핑 완료: {result.stats.totalScraped}개 수집
-              {result.stats.filteredOut !== undefined && result.stats.filteredOut > 0 && (
-                <>, {result.stats.filteredOut}개 필터링</>
-              )}
-              {result.stats.saved !== undefined && (
-                <>, {result.stats.saved}개 저장 완료</>
-              )}
-              {result.stats.failed !== undefined && result.stats.failed > 0 && (
-                <> ({result.stats.failed}개 저장 실패)</>
-              )}
-            </p>
-            <p className="text-xs text-green-600 dark:text-green-400 mt-1">
-              ⏱️  소요 시간: {(result.stats.duration / 1000).toFixed(1)}초 | 📄 페이지: {result.stats.pagesScraped}개
-            </p>
-            <p className="text-xs text-green-600 dark:text-green-400 mt-1">
-              💡 Supabase Dashboard에서 저장된 상품을 확인하세요.
             </p>
           </div>
         )}
@@ -377,8 +364,9 @@ export default function DashboardPage() {
               type="checkbox"
               defaultChecked
               className="w-4 h-4"
+              disabled
             />
-            <span>50개 상품 Max 수집</span>
+            <span>하루 최대 1000개 수집 (1분당 1개)</span>
           </label>
         </div>
       </div>

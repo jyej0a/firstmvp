@@ -28,23 +28,42 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { processSearchInput } from "@/lib/utils/url-processor";
-import { scrapeAmazonProducts } from "@/lib/scraper/amazon-scraper";
+import { auth } from "@clerk/nextjs/server";
 import { checkRateLimit, getClientIp } from "@/lib/utils/rate-limiter";
-import { filterByBannedKeywords } from "@/lib/utils/filter-banned-keywords";
-import { saveProductsToDatabase } from "@/lib/utils/save-products";
+import { startSequentialScraping } from "@/lib/scraper/sequential-scraper";
 import type { ApiResponse } from "@/types";
 
 /**
  * POST 요청 핸들러
- * 아마존 상품 스크래핑 실행
+ * 순차 처리 스크래핑 Job 시작
+ *
+ * 변경사항:
+ * - 기존: 동기식 수집 → 응답
+ * - 변경: 비동기 Job 시작 → 즉시 응답 (202 Accepted)
  */
 export async function POST(request: NextRequest) {
-  console.group("🔥 [API] 스크래핑 요청 수신");
-  const startTime = Date.now();
+  console.group("🔥 [API] 순차 처리 스크래핑 요청 수신");
 
   try {
-    // 1. Rate Limiting 체크 (Bot Detection 대응)
+    // 1. 사용자 인증 확인
+    const { userId } = await auth();
+
+    if (!userId) {
+      console.error("❌ 인증되지 않은 사용자");
+      console.groupEnd();
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: "인증이 필요합니다.",
+        } satisfies ApiResponse,
+        { status: 401 }
+      );
+    }
+
+    console.log(`👤 사용자 ID: ${userId}`);
+
+    // 2. Rate Limiting 체크 (Bot Detection 대응)
     const clientIp = getClientIp(request);
     console.log(`🌐 클라이언트 IP: ${clientIp}`);
 
@@ -70,11 +89,14 @@ export async function POST(request: NextRequest) {
 
     // 2. 요청 바디 파싱
     const body = await request.json();
-    const { searchInput } = body;
+    const { searchInput, totalTarget } = body;
 
     console.log(`📝 입력값: "${searchInput}"`);
+    if (totalTarget) {
+      console.log(`🎯 목표 개수: ${totalTarget}개`);
+    }
 
-    // 2. 입력값 검증
+    // 3. 입력값 검증
     if (!searchInput || typeof searchInput !== "string") {
       console.error("❌ 유효하지 않은 입력값");
       console.groupEnd();
@@ -88,170 +110,64 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 3. URL 처리 (키워드 → Amazon URL 변환 또는 URL 검증)
-    console.log("🔄 URL 처리 중...");
-    let processedUrl: string;
+    // 4. 목표 개수 검증
+    if (totalTarget !== undefined) {
+      if (typeof totalTarget !== "number" || totalTarget <= 0 || totalTarget > 1000) {
+        console.error("❌ 유효하지 않은 목표 개수");
+        console.groupEnd();
 
-    try {
-      const processed = processSearchInput(searchInput);
-      processedUrl = processed.url;
-      console.log(`✅ 처리 완료 (타입: ${processed.type})`);
-      console.log(`   URL: ${processedUrl}`);
-    } catch (urlError) {
-      console.error("❌ URL 처리 실패:", urlError);
-      console.groupEnd();
-
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            urlError instanceof Error
-              ? urlError.message
-              : "URL 처리 중 오류가 발생했습니다.",
-        } satisfies ApiResponse,
-        { status: 400 }
-      );
+        return NextResponse.json(
+          {
+            success: false,
+            error: "목표 개수는 1 이상 1000 이하여야 합니다.",
+          } satisfies ApiResponse,
+          { status: 400 }
+        );
+      }
     }
 
-    // 4. 스크래핑 실행
-    console.log("🚀 스크래핑 시작...");
+    // 5. 순차 처리 Job 시작
+    console.log("🚀 순차 처리 Job 시작...");
     try {
-      const result = await scrapeAmazonProducts(processedUrl, {
-        maxProducts: 30,
-        timeout: 60000, // 60초 타임아웃
-        headless: true,
-        verbose: false,
+      const jobId = await startSequentialScraping({
+        userId,
+        searchInput,
+        totalTarget: totalTarget || 1000,
       });
 
-      const duration = Date.now() - startTime;
-      console.log(`✅ 스크래핑 완료 (${duration}ms)`);
-      console.log(`   수집 상품: ${result.totalScraped}개`);
-      console.log(`   수집 페이지: ${result.pagesScraped}페이지`);
-
-      // 5. 금지어 필터링
-      console.log("\n🔍 금지어 필터링 실행...");
-      const filterResult = await filterByBannedKeywords(result.products);
-
-      console.log(`✅ 필터링 완료`);
-      console.log(`   필터링 전: ${filterResult.stats.total}개`);
-      console.log(`   필터링 후: ${filterResult.stats.passed}개`);
-      console.log(`   제거됨: ${filterResult.stats.filteredOut}개`);
-
-      // 6. DB 저장
-      console.log("\n💾 DB 저장 실행...");
-      const saveResult = await saveProductsToDatabase(
-        filterResult.filteredProducts
-      );
-
-      console.log(`✅ DB 저장 완료`);
-      console.log(`   저장 성공: ${saveResult.saved}개`);
-      console.log(`   저장 실패: ${saveResult.failed}개`);
+      console.log(`✅ Job 시작 완료: ${jobId}`);
       console.groupEnd();
 
-      // 7. 성공 응답
-      const message = (() => {
-        const parts: string[] = [];
-
-        // 수집 결과
-        parts.push(`${result.totalScraped}개 스크래핑`);
-
-        // 필터링 결과
-        if (filterResult.stats.filteredOut > 0) {
-          parts.push(`${filterResult.stats.filteredOut}개 필터링`);
-        }
-
-        // 저장 결과
-        parts.push(`${saveResult.saved}개 저장 완료`);
-
-        if (saveResult.failed > 0) {
-          parts.push(`${saveResult.failed}개 저장 실패`);
-        }
-
-        return parts.join(", ");
-      })();
-
+      // 6. 즉시 응답 (202 Accepted)
       return NextResponse.json(
         {
           success: true,
           data: {
-            products: filterResult.filteredProducts,
-            stats: {
-              totalScraped: result.totalScraped,
-              filteredOut: filterResult.stats.filteredOut,
-              saved: saveResult.saved,
-              failed: saveResult.failed,
-              finalCount: saveResult.saved,
-              duration: result.duration,
-              pagesScraped: result.pagesScraped,
-            },
+            jobId,
+            message: "순차 처리 작업이 시작되었습니다.",
           },
-          message,
+          message: "수집 작업이 시작되었습니다. 진행 상황을 확인하세요.",
         } satisfies ApiResponse,
-        { status: 200 }
+        { status: 202 }
       );
-    } catch (scrapeError) {
-      console.error("❌ 스크래핑 실패:", scrapeError);
+    } catch (jobError) {
+      console.error("❌ Job 시작 실패:", jobError);
       console.groupEnd();
 
-      // 스크래핑 에러 타입별 처리
-      if (scrapeError instanceof Error) {
-        // Timeout 에러
-        if (scrapeError.message.includes("timeout")) {
-          return NextResponse.json(
-            {
-              success: false,
-              error:
-                "요청 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.",
-            } satisfies ApiResponse,
-            { status: 408 }
-          );
-        }
-
-        // Network 에러
-        if (
-          scrapeError.message.includes("network") ||
-          scrapeError.message.includes("ERR_")
-        ) {
-          return NextResponse.json(
-            {
-              success: false,
-              error:
-                "네트워크 오류가 발생했습니다. 인터넷 연결을 확인해 주세요.",
-            } satisfies ApiResponse,
-            { status: 503 }
-          );
-        }
-
-        // Amazon 접근 차단 (Bot Detection)
-        if (
-          scrapeError.message.includes("blocked") ||
-          scrapeError.message.includes("captcha")
-        ) {
-          return NextResponse.json(
-            {
-              success: false,
-              error:
-                "일시적으로 Amazon 접근이 제한되었습니다. 잠시 후 다시 시도해 주세요.",
-            } satisfies ApiResponse,
-            { status: 503 }
-          );
-        }
-
-        // 일반 에러
+      if (jobError instanceof Error) {
         return NextResponse.json(
           {
             success: false,
-            error: `스크래핑 중 오류가 발생했습니다: ${scrapeError.message}`,
+            error: `작업 시작 실패: ${jobError.message}`,
           } satisfies ApiResponse,
           { status: 500 }
         );
       }
 
-      // 알 수 없는 에러
       return NextResponse.json(
         {
           success: false,
-          error: "알 수 없는 오류가 발생했습니다. 다시 시도해 주세요.",
+          error: "작업 시작 중 오류가 발생했습니다.",
         } satisfies ApiResponse,
         { status: 500 }
       );
@@ -278,26 +194,28 @@ export async function GET() {
   return NextResponse.json(
     {
       success: true,
-      message: "아마존 상품 스크래핑 API",
+      message: "순차 처리 스크래핑 API",
       usage: {
         method: "POST",
         endpoint: "/api/scrape",
         body: {
           searchInput:
             "string (키워드 또는 Amazon URL, 예: 'phone stand' 또는 'https://amazon.com/s?k=...')",
+          totalTarget: "number (선택사항, 기본값: 1000, 최대: 1000)",
         },
         response: {
           success: "boolean",
           data: {
-            products: "ScrapedProductRaw[]",
-            stats: {
-              totalScraped: "number",
-              duration: "number (ms)",
-              pagesScraped: "number",
-            },
+            jobId: "string (Job ID, 진행 상황 조회에 사용)",
+            message: "string",
           },
           message: "string",
         },
+        status: "202 Accepted (작업이 백그라운드에서 시작됨)",
+      },
+      progress: {
+        endpoint: "GET /api/scrape/[jobId]",
+        description: "Job ID로 진행 상황 조회",
       },
     },
     { status: 200 }

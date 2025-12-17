@@ -114,11 +114,25 @@ async function initPage(
   await page.setUserAgent(USER_AGENT);
   console.log("✅ User-Agent 설정 완료");
 
-  // 언어 설정 (영어로 고정)
+  // 언어 및 통화 설정 (영어/달러로 고정)
   await page.setExtraHTTPHeaders({
     "Accept-Language": "en-US,en;q=0.9",
   });
-  console.log("✅ 언어 설정 완료 (영어)");
+  
+  // 쿠키 설정: 미국 사이트 및 달러 통화 강제
+  await page.setCookie({
+    name: 'i18n-prefs',
+    value: 'USD',
+    domain: '.amazon.com',
+    path: '/',
+  });
+  await page.setCookie({
+    name: 'lc-main',
+    value: 'en_US',
+    domain: '.amazon.com',
+    path: '/',
+  });
+  console.log("✅ 언어 및 통화 설정 완료 (영어/달러)");
 
   // 타임아웃 설정
   page.setDefaultNavigationTimeout(timeout);
@@ -289,9 +303,29 @@ async function extractProductsFromPage(
           }
         }
 
-        // 가격 파싱 (숫자와 소수점만 추출)
+        // 가격 파싱: 달러 기호($)가 있는 가격만 사용
+        // 원화 기호(₩, 원)가 있으면 경고하고 스킵
+        const hasWonSymbol = /[₩원]/.test(priceText);
+        const hasDollarSymbol = /\$/.test(priceText);
+        
+        if (hasWonSymbol && !hasDollarSymbol) {
+          if (verboseMode) {
+            console.warn(`  ⚠️  원화 가격 감지, 스킵: ${priceText} (제목: ${title.substring(0, 30)}...)`);
+          }
+          return; // 원화 가격은 스킵
+        }
+
+        // 달러 가격 파싱 (숫자와 소수점만 추출)
         const cleanPrice = priceText.replace(/[^0-9.]/g, "");
         const amazonPrice = cleanPrice ? parseFloat(cleanPrice) : 0;
+        
+        // 가격이 0이거나 비정상적으로 큰 경우(원화로 오인했을 가능성) 체크
+        if (amazonPrice > 10000 && !hasDollarSymbol) {
+          if (verboseMode) {
+            console.warn(`  ⚠️  비정상적으로 큰 가격 감지, 스킵: ${amazonPrice} (제목: ${title.substring(0, 30)}...)`);
+          }
+          return; // 원화로 오인한 것 같으면 스킵
+        }
 
         // URL 추출
         const linkElement = element.querySelector("h2 a, a.s-link-style");
@@ -358,6 +392,94 @@ async function goToNextPage(page: Page): Promise<boolean> {
   } catch (error) {
     console.error("다음 페이지 이동 실패:", error);
     return false;
+  }
+}
+
+/**
+ * 1개 상품만 수집하는 함수 (순차 처리용)
+ *
+ * 검색 결과 페이지에서 특정 인덱스의 상품 하나만 추출합니다.
+ * 페이지네이션을 고려하여 offset만큼 건너뛰고 해당 위치의 상품을 반환합니다.
+ *
+ * @param searchUrl - 아마존 검색 URL
+ * @param offset - 건너뛸 상품 개수 (이미 수집한 상품 수)
+ * @param options - 스크래핑 옵션
+ * @returns 수집된 상품 (1개) 또는 null (수집 실패 시)
+ *
+ * @example
+ * const product = await scrapeSingleProduct(
+ *   "https://www.amazon.com/s?k=neck+device",
+ *   5  // 5개 건너뛰고 6번째 상품 수집
+ * );
+ */
+export async function scrapeSingleProduct(
+  searchUrl: string,
+  offset: number = 0,
+  options: ScraperOptions = {}
+): Promise<ScrapedProductRaw | null> {
+  const { timeout = 60000, headless = true, verbose = false } = options;
+
+  console.log(`🔍 [Single Product] offset=${offset} 상품 수집 시작`);
+
+  let browser: Browser | null = null;
+
+  try {
+    // 1. 브라우저 초기화
+    browser = await initBrowser(headless);
+    const page = await initPage(browser, timeout);
+
+    // 2. 페이지네이션 계산 (페이지당 약 16개 상품 가정)
+    const productsPerPage = 16;
+    const targetPage = Math.floor(offset / productsPerPage) + 1;
+    const targetIndex = offset % productsPerPage;
+
+    // 3. 해당 페이지로 이동
+    if (targetPage > 1) {
+      const pageUrl = new URL(searchUrl);
+      pageUrl.searchParams.set("page", String(targetPage));
+      const paginatedUrl = pageUrl.toString();
+
+      console.log(`📄 페이지 ${targetPage}로 이동 (URL: ${paginatedUrl})`);
+      await page.goto(paginatedUrl, {
+        waitUntil: "networkidle2",
+        timeout,
+      });
+    } else {
+      console.log(`📄 첫 페이지 접속`);
+      await page.goto(searchUrl, {
+        waitUntil: "networkidle2",
+        timeout,
+      });
+    }
+
+    // 4. 페이지에서 상품 목록 추출
+    const products = await extractProductsFromPage(page, verbose);
+
+    if (products.length === 0) {
+      console.warn("⚠️  페이지에 상품이 없습니다");
+      return null;
+    }
+
+    // 5. 해당 인덱스의 상품 반환
+    if (targetIndex >= products.length) {
+      console.warn(
+        `⚠️  인덱스 ${targetIndex}가 범위를 벗어남 (페이지 상품 수: ${products.length})`
+      );
+      return null;
+    }
+
+    const product = products[targetIndex];
+    console.log(`✅ 상품 수집 완료: ${product.title.substring(0, 50)}...`);
+
+    return product;
+  } catch (error) {
+    console.error("❌ 단일 상품 수집 실패:", error);
+    throw error;
+  } finally {
+    // 브라우저 종료
+    if (browser) {
+      await browser.close();
+    }
   }
 }
 
@@ -433,11 +555,8 @@ export async function scrapeAmazonProducts(
         break;
       }
 
-      // MVP 1.0: 2-3 페이지만 수집
-      if (pagesScraped >= 3) {
-        console.log("\n⚠️  최대 페이지 수(3페이지) 도달");
-        break;
-      }
+      // 페이지네이션 제한 해제 (하루 최대 1000개 지원)
+      // 더 이상 페이지가 없을 때까지 수집 가능
 
       // 다음 페이지로 이동
       const hasNextPage = await goToNextPage(page);

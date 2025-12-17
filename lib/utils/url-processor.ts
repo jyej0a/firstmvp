@@ -82,9 +82,14 @@ function validateAndProcessUrl(urlString: string): ProcessedSearchInput {
       throw new Error('Amazon URL만 사용할 수 있습니다. (예: amazon.com)');
     }
 
-    // 유효한 Amazon URL
+    // 달러 통화 파라미터 추가 (없는 경우에만)
+    if (!url.searchParams.has('currency')) {
+      url.searchParams.set('currency', 'USD');
+    }
+
+    // 유효한 Amazon URL (달러 통화 강제)
     return {
-      url: urlString,
+      url: url.toString(),
       originalInput: urlString,
       type: 'url',
     };
@@ -110,8 +115,8 @@ function createAmazonSearchUrl(keyword: string): ProcessedSearchInput {
   // 키워드를 URL 인코딩 (공백은 +로 변환)
   const encodedKeyword = encodeURIComponent(keyword).replace(/%20/g, '+');
   
-  // Amazon 검색 URL 생성
-  const amazonSearchUrl = `https://www.amazon.com/s?k=${encodedKeyword}`;
+  // Amazon 검색 URL 생성 (달러 통화 강제)
+  const amazonSearchUrl = `https://www.amazon.com/s?k=${encodedKeyword}&currency=USD`;
 
   return {
     url: amazonSearchUrl,
