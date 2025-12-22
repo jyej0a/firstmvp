@@ -73,8 +73,12 @@ function validateShopifyConfig(): ConfigValidation {
  * @returns Shopify API 요청 형식의 상품 데이터
  */
 function formatProductForShopify(product: Product): ShopifyProductInput {
-  // 이미지 배열 변환 (최대 10개)
-  const images: ShopifyImage[] = product.images
+  // 이미지 중복 제거 (이중 안전장치)
+  const { deduplicateImages } = require("@/lib/utils/image-deduplicator");
+  const uniqueImages = deduplicateImages(product.images);
+  
+  // 이미지 배열 변환 (최대 10개, 중복 제거 후)
+  const images: ShopifyImage[] = uniqueImages
     .slice(0, 10)
     .map((url, index) => ({
       src: url,

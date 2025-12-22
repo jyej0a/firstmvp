@@ -156,16 +156,16 @@ export async function POST(request: NextRequest) {
     console.log(`   - 저장: ${result.stats.saved}개`);
     console.log(`   - 실패: ${result.stats.failed}개`);
     console.log(`   - 소요 시간: ${(result.stats.duration / 1000).toFixed(2)}초`);
-    console.groupEnd();
+        console.groupEnd();
 
-    return NextResponse.json(
-      {
-        success: true,
+      return NextResponse.json(
+        {
+          success: true,
         data: result,
         message: `${result.stats.saved}개 상품이 수집되고 저장되었습니다.`,
-      } satisfies ApiResponse,
+        } satisfies ApiResponse,
       { status: 200 }
-    );
+      );
   } catch (error) {
     console.error("❌ API 처리 중 예상치 못한 오류:", error);
     console.groupEnd();

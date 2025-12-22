@@ -1,425 +1,355 @@
 /**
  * @file app/dashboard-v2/page.tsx
- * @description Trend-Hybrid Admin 대시보드 V2 (순차 처리)
+ * @description Dashboard 페이지 (수집 현황 그래프)
  * 
- * V2: 순차 처리 스크래핑
- * - 1분당 1개씩 순차 수집
- * - 자동 DB 저장 및 Shopify 등록
- * - 진행 상황 실시간 표시
+ * 수집 현황을 그래프로 시각화하는 대시보드
+ * - 일별 수집 현황 그래프
+ * - 상태별 상품 통계
+ * - 최근 수집 작업 현황
  */
 
 'use client';
 
 import { useState, useEffect } from 'react';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import ProductList from '@/components/ProductList';
-import ScrapingProgress from '@/components/ScrapingProgress';
-import type { ApiResponse, Product, ShopifyUploadResult } from '@/types';
+import Link from 'next/link';
+import { ArrowRight, TrendingUp, Package, CheckCircle, XCircle, Clock } from 'lucide-react';
+import type { ApiResponse } from '@/types';
 
-export default function DashboardV2Page() {
-  const [searchInput, setSearchInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+interface DashboardStats {
+  products: {
+    total: number;
+    byStatus: {
+      draft: number;
+      uploaded: number;
+      error: number;
+    };
+  };
+  dailyCollection: Array<{
+    date: string;
+    count: number;
+  }>;
+  jobs: {
+    total: number;
+    recent: Array<{
+      id: string;
+      status: string;
+      successCount: number;
+      failedCount: number;
+      createdAt: string;
+    }>;
+  };
+}
+
+const COLORS = {
+  draft: '#94a3b8',
+  uploaded: '#22c55e',
+  error: '#ef4444',
+};
+
+export default function DashboardPage() {
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
-  // 순차 처리 Job ID 상태
-  const [currentJobId, setCurrentJobId] = useState<string | null>(null);
+  const [timeRange, setTimeRange] = useState<'7d' | '30d'>('30d');
 
-  // Phase 2.13: 상품 목록 상태
-  const [products, setProducts] = useState<Product[]>([]);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [isLoadingProducts, setIsLoadingProducts] = useState(false);
-
-  // Phase 2.21: 일괄 등록 상태
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadMessage, setUploadMessage] = useState<string | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-
-  // Phase 2.13: 페이지 로드 시 상품 목록 자동 조회
   useEffect(() => {
-    fetchProducts();
+    fetchStats();
+    // 30초마다 자동 새로고침
+    const interval = setInterval(fetchStats, 30000);
+    return () => clearInterval(interval);
   }, []);
 
-  // 상품 목록 조회 함수
-  const fetchProducts = async () => {
-    console.group('📋 [Dashboard V2] 상품 목록 조회');
-    setIsLoadingProducts(true);
-
-    try {
-      const response = await fetch('/api/products');
-      const data: ApiResponse<{
-        products: Product[];
-        total: number;
-        limit: number;
-        offset: number;
-      }> = await response.json();
-
-      console.log('📦 조회 결과:', data);
-
-      if (response.ok && data.success && data.data) {
-        setProducts(data.data.products);
-        console.log(`✅ ${data.data.products.length}개 상품 조회 완료`);
-      } else {
-        console.error('❌ 상품 조회 실패:', data.error);
-      }
-    } catch (err) {
-      console.error('❌ 상품 조회 중 오류:', err);
-    } finally {
-      setIsLoadingProducts(false);
-      console.groupEnd();
-    }
-  };
-
-  // Phase 2.16: 마진율 변경 핸들러
-  const handleMarginChange = async (productId: string, newMargin: number) => {
-    console.group('💰 [Dashboard V2] 마진율 업데이트');
-    console.log(`상품 ID: ${productId}`);
-    console.log(`새 마진율: ${newMargin}%`);
-
-    try {
-      const response = await fetch(`/api/products/${productId}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ marginRate: newMargin }),
-      });
-
-      const data: ApiResponse<Product> = await response.json();
-
-      if (response.ok && data.success && data.data) {
-        console.log('✅ 마진율 업데이트 성공');
-        console.log(`   - 새 판매가: $${data.data.sellingPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-
-        // 로컬 상품 목록 업데이트
-        setProducts((prevProducts) =>
-          prevProducts.map((p) =>
-            p.id === productId
-              ? { ...p, marginRate: newMargin, sellingPrice: data.data!.sellingPrice }
-              : p
-          )
-        );
-      } else {
-        console.error('❌ 마진율 업데이트 실패:', data.error);
-      }
-    } catch (err) {
-      console.error('❌ 마진율 업데이트 중 오류:', err);
-    } finally {
-      console.groupEnd();
-    }
-  };
-
-  // Phase 2.21: Shopify 일괄 등록 핸들러
-  const handleBulkUpload = async () => {
-    console.group('🛒 [Dashboard V2] Shopify 일괄 등록');
-    console.log(`선택된 상품 개수: ${selectedIds.length}개`);
-
-    // 상태 초기화
-    setIsUploading(true);
-    setUploadMessage(null);
-    setUploadError(null);
-
-    try {
-      console.log('📡 일괄 등록 API 요청 전송 중...');
-      const response = await fetch('/api/shopify/bulk-upload', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ product_ids: selectedIds }),
-      });
-
-      const data: ApiResponse<ShopifyUploadResult> = await response.json();
-      console.log('📦 API 응답:', data);
-
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Shopify 등록에 실패했습니다.');
-      }
-
-      // 성공
-      const result = data.data!;
-      console.log('✅ 일괄 등록 완료!');
-      console.log(`   - 총 시도: ${result.total}개`);
-      console.log(`   - 성공: ${result.success}개`);
-      console.log(`   - 실패: ${result.failed}개`);
-
-      if (result.failures.length > 0) {
-        console.log('   - 실패 상세:', result.failures);
-      }
-
-      // 성공 메시지 설정
-      let message = `${result.success}개 상품이 Shopify에 등록되었습니다.`;
-      if (result.failed > 0) {
-        message += ` (${result.failed}개 실패)`;
-      }
-      setUploadMessage(message);
-
-      // 실패 상세 정보를 에러로 표시 (선택 사항)
-      if (result.failures.length > 0) {
-        const errorDetails = result.failures
-          .map((f, idx) => `${idx + 1}. ASIN ${f.asin}: ${f.error}`)
-          .join('\n');
-        console.error('❌ 실패 상세:\n' + errorDetails);
-      }
-
-      // 상품 목록 새로고침
-      console.log('🔄 상품 목록 새로고침 중...');
-      await fetchProducts();
-
-      // 선택 초기화
-      setSelectedIds([]);
-
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다.';
-      console.error('❌ 일괄 등록 실패:', errorMessage);
-      setUploadError(errorMessage);
-    } finally {
-      setIsUploading(false);
-      console.groupEnd();
-    }
-  };
-
-  // 순차 처리 스크래핑 시작
-  const handleScrape = async () => {
-    console.group('🔍 [Dashboard V2] 순차 처리 수집 시작');
-    console.log('입력값:', searchInput);
-
-    // 상태 초기화
+  const fetchStats = async () => {
     setIsLoading(true);
     setError(null);
-    setCurrentJobId(null);
 
     try {
-      console.log('📡 API 요청 전송 중...');
-      const response = await fetch('/api/scrape-v2', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          searchInput,
-          totalTarget: 1000, // 하루 최대 1000개
-        }),
-      });
+      const response = await fetch('/api/dashboard/stats');
+      const data: ApiResponse<DashboardStats> = await response.json();
 
-      const data: ApiResponse<{ jobId: string; message: string }> = await response.json();
-      console.log('📦 API 응답:', data);
-
-      if (!response.ok || !data.success || !data.data) {
-        throw new Error(data.error || '스크래핑 작업 시작에 실패했습니다.');
+      if (response.ok && data.success && data.data) {
+        setStats(data.data);
+      } else {
+        setError(data.error || '통계를 불러올 수 없습니다.');
       }
-
-      // Job ID 저장
-      setCurrentJobId(data.data.jobId);
-      console.log('✅ 순차 처리 작업 시작됨!');
-      console.log(`   - Job ID: ${data.data.jobId}`);
-      console.log(`   - 메시지: ${data.data.message}`);
-
-      // 상품 목록 주기적 새로고침 (진행 중)
-      const refreshInterval = setInterval(() => {
-        fetchProducts();
-      }, 10000); // 10초마다 새로고침
-
-      // 완료 시 인터벌 정리 (나중에 ScrapingProgress에서 처리)
-
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다.';
-      console.error('❌ 스크래핑 작업 시작 실패:', errorMessage);
-      setError(errorMessage);
-      setIsLoading(false);
+      console.error('통계 조회 오류:', err);
+      setError('통계를 불러오는 중 오류가 발생했습니다.');
     } finally {
-      console.groupEnd();
+      setIsLoading(false);
     }
   };
 
-  // 작업 완료 시 콜백
-  const handleJobComplete = () => {
-    console.log('✅ 순차 처리 작업 완료');
-    setIsLoading(false);
-    // 상품 목록 최종 새로고침
-    fetchProducts();
+  // 날짜 포맷팅 (MM/DD)
+  const formatDate = (dateStr: string) => {
+    const date = new Date(dateStr);
+    return `${date.getMonth() + 1}/${date.getDate()}`;
   };
 
+  // 시간 범위에 따른 데이터 필터링
+  const filteredDailyData = stats?.dailyCollection
+    ? timeRange === '7d'
+      ? stats.dailyCollection.slice(-7)
+      : stats.dailyCollection
+    : [];
+
+  // 상태별 파이 차트 데이터
+  const statusChartData = stats
+    ? [
+        { name: 'Draft', value: stats.products.byStatus.draft, color: COLORS.draft },
+        { name: 'Uploaded', value: stats.products.byStatus.uploaded, color: COLORS.uploaded },
+        { name: 'Error', value: stats.products.byStatus.error, color: COLORS.error },
+      ].filter((item) => item.value > 0)
+    : [];
+
+  if (isLoading && !stats) {
+    return (
+      <div className="container mx-auto px-4 py-8 max-w-7xl">
+        <p className="text-muted-foreground">통계를 불러오는 중...</p>
+      </div>
+    );
+  }
+
+  if (error || !stats) {
+    return (
+      <div className="container mx-auto px-4 py-8 max-w-7xl">
+        <div className="p-6 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-none">
+          <p className="text-red-700 dark:text-red-300">{error || '통계를 불러올 수 없습니다.'}</p>
+          <Button onClick={fetchStats} className="mt-4" variant="outline">
+            다시 시도
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="container mx-auto px-4 py-8 max-w-7xl bg-terminal min-h-screen">
+    <div className="container mx-auto px-4 py-8 max-w-7xl">
       {/* 헤더 */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">na-zak-zon V2</h1>
+        <h1 className="text-3xl font-bold mb-2">Dashboard</h1>
         <p className="text-muted-foreground">
-          순차 처리 모드 (1분당 1개, 자동 등록)
+          Collection Status & Statistics
         </p>
       </div>
 
-      {/* 🚀 Quick Links (트렌드 숏컷) */}
-      <div className="mb-6 p-4 bg-card rounded-none border">
-        <h2 className="text-sm font-semibold mb-3 text-muted-foreground">
-           TREND SHORTCUTS
-        </h2>
-        <div className="flex gap-2 flex-wrap">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => window.open('https://www.kalodata.com', '_blank')}
-          >
-            🔗 Kalodata
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              window.open('https://www.amazon.com/Best-Sellers/zgbs', '_blank')
-            }
-          >
-            📦 Amazon BSR
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              window.open(
-                'https://www.tiktok.com/tag/tiktokmademebuyit',
-                '_blank'
-              )
-            }
-          >
-            💡 TikTok Trends
-          </Button>
+      {/* 통계 카드 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        {/* 총 상품 수 */}
+        <div className="p-6 bg-card rounded-none border">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-muted-foreground mb-1">Total Products</p>
+              <p className="text-3xl font-bold">{stats.products.total.toLocaleString()}</p>
+            </div>
+            <Package className="h-8 w-8 text-muted-foreground" />
+          </div>
+        </div>
+
+        {/* Draft */}
+        <div className="p-6 bg-card rounded-none border">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-muted-foreground mb-1">Draft</p>
+              <p className="text-3xl font-bold" style={{ color: COLORS.draft }}>
+                {stats.products.byStatus.draft.toLocaleString()}
+              </p>
+            </div>
+            <Clock className="h-8 w-8" style={{ color: COLORS.draft }} />
+          </div>
+        </div>
+
+        {/* Uploaded */}
+        <div className="p-6 bg-card rounded-none border">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-muted-foreground mb-1">Uploaded</p>
+              <p className="text-3xl font-bold" style={{ color: COLORS.uploaded }}>
+                {stats.products.byStatus.uploaded.toLocaleString()}
+              </p>
+            </div>
+            <CheckCircle className="h-8 w-8" style={{ color: COLORS.uploaded }} />
+          </div>
+        </div>
+
+        {/* Error */}
+        <div className="p-6 bg-card rounded-none border">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-muted-foreground mb-1">Error</p>
+              <p className="text-3xl font-bold" style={{ color: COLORS.error }}>
+                {stats.products.byStatus.error.toLocaleString()}
+              </p>
+            </div>
+            <XCircle className="h-8 w-8" style={{ color: COLORS.error }} />
+          </div>
         </div>
       </div>
 
-      {/* 메인 액션: 키워드 또는 URL 입력 & 순차 수집 */}
+      {/* 그래프 섹션 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        {/* 일별 수집 현황 (라인 차트) */}
+        <div className="p-6 bg-card rounded-none border">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold">Daily Collection</h2>
+            <div className="flex gap-2">
+              <Button
+                variant={timeRange === '7d' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setTimeRange('7d')}
+              >
+                7 Days
+              </Button>
+              <Button
+                variant={timeRange === '30d' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setTimeRange('30d')}
+              >
+                30 Days
+              </Button>
+            </div>
+          </div>
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={filteredDailyData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis
+                dataKey="date"
+                tickFormatter={formatDate}
+                tick={{ fontSize: 12 }}
+              />
+              <YAxis tick={{ fontSize: 12 }} />
+              <Tooltip
+                labelFormatter={(label) => `Date: ${label}`}
+                formatter={(value: number) => [`${value} items`, 'Collected']}
+              />
+              <Legend />
+              <Line
+                type="monotone"
+                dataKey="count"
+                stroke="#22c55e"
+                strokeWidth={2}
+                name="Products Collected"
+                dot={{ r: 4 }}
+                activeDot={{ r: 6 }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* 상태별 분포 (파이 차트) */}
+        <div className="p-6 bg-card rounded-none border">
+          <h2 className="text-lg font-semibold mb-4">Status Distribution</h2>
+          {statusChartData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={300}>
+              <PieChart>
+                <Pie
+                  data={statusChartData}
+                  cx="50%"
+                  cy="50%"
+                  labelLine={false}
+                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                  outerRadius={100}
+                  fill="#8884d8"
+                  dataKey="value"
+                >
+                  {statusChartData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(value: number) => `${value} items`} />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex items-center justify-center h-[300px] text-muted-foreground">
+              No data available
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 최근 수집 작업 */}
       <div className="mb-6 p-6 bg-card rounded-none border">
-        <h2 className="text-lg font-semibold mb-4">
-          Enter URL or Keyword
-        </h2>
-
-        <div className="flex gap-2 mb-4">
-          <Input
-            placeholder="🔍 키워드 입력 또는 Amazon URL 붙여넣기..."
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && !isLoading && handleScrape()}
-            disabled={isLoading}
-            className="flex-1"
-          />
-          <Button
-            onClick={handleScrape}
-            disabled={!searchInput.trim() || isLoading}
-            className="px-8"
-          >
-            {isLoading ? '수집 중...' : '수집 시작'}
-          </Button>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">Recent Jobs</h2>
+          <Link href="/dashboard-v2/history">
+            <Button variant="outline" size="sm">
+              View All <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
+          </Link>
         </div>
-
-        {/* 순차 처리 진행 상황 표시 */}
-        {currentJobId && (
-          <div className="mb-4">
-            <ScrapingProgress
-              jobId={currentJobId}
-              pollingInterval={5000}
-              apiPath="/api/scrape-v2"
-              onComplete={handleJobComplete}
-            />
+        {stats.jobs.recent.length > 0 ? (
+          <div className="space-y-2">
+            {stats.jobs.recent.map((job) => (
+              <div
+                key={job.id}
+                className="flex items-center justify-between p-3 border border-border rounded-none hover:bg-muted/50"
+              >
+                <div className="flex items-center gap-4">
+                  <span
+                    className={`px-2 py-1 text-xs font-medium rounded-none ${
+                      job.status === 'completed'
+                        ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300'
+                        : job.status === 'running'
+                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300'
+                        : job.status === 'failed'
+                        ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300'
+                        : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    {job.status}
+                  </span>
+                  <span className="text-sm text-muted-foreground">
+                    {new Date(job.createdAt).toLocaleString('en-US')}
+                  </span>
+                </div>
+                <div className="flex items-center gap-4 text-sm">
+                  <span className="text-green-600 dark:text-green-400">
+                    Success: {job.successCount}
+                  </span>
+                  <span className="text-red-600 dark:text-red-400">
+                    Failed: {job.failedCount}
+                  </span>
+                </div>
+              </div>
+            ))}
           </div>
+        ) : (
+          <p className="text-muted-foreground text-center py-8">No recent jobs</p>
         )}
-
-        {/* 에러 메시지 표시 */}
-        {error && (
-          <div className="mb-4 p-3 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-none">
-            <p className="text-sm text-red-700 dark:text-red-300">
-              ❌ {error}
-            </p>
-          </div>
-        )}
-
-        {/* 체크박스 옵션 */}
-        <div className="flex gap-4 text-sm text-muted-foreground">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              defaultChecked
-              className="w-4 h-4"
-            />
-            <span>금지어 자동 필터링 적용 (ON)</span>
-          </label>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              defaultChecked
-              className="w-4 h-4"
-              disabled
-            />
-            <span>하루 최대 1000개 수집 (1분당 1개)</span>
-          </label>
-        </div>
       </div>
 
-      {/* Phase 2.21: 선택 등록 버튼 */}
-      {products.length > 0 && (
-        <div className="mb-6 p-4 bg-card rounded-none border">
-          <div className="flex items-center justify-between mb-3">
-          <div className="text-sm text-muted-foreground">
-            {selectedIds.length > 0 ? (
-              <span>
-                <span className="font-bold text-primary">{selectedIds.length}개</span> 상품 선택됨
-              </span>
-            ) : (
-              <span>상품을 선택하고 &quot;선택 등록&quot; 버튼을 클릭하세요</span>
-            )}
+      {/* 빠른 액션 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Link href="/dashboard-v2/scrape">
+          <div className="p-6 bg-card rounded-none border hover:bg-muted/50 transition-colors cursor-pointer">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold mb-2">Start.</h3>
+                <p className="text-sm text-muted-foreground">
+                  Begin collecting new products
+                </p>
+              </div>
+              <TrendingUp className="h-8 w-8 text-muted-foreground" />
+            </div>
           </div>
-          <Button
-              onClick={handleBulkUpload}
-              disabled={selectedIds.length === 0 || isUploading}
-            className="px-6"
-          >
-              {isUploading ? '등록 중...' : `선택 등록 (${selectedIds.length})`}
-          </Button>
+        </Link>
+
+        <Link href="/dashboard-v2/products">
+          <div className="p-6 bg-card rounded-none border hover:bg-muted/50 transition-colors cursor-pointer">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold mb-2">Product List</h3>
+                <p className="text-sm text-muted-foreground">
+                  Manage collected products
+                </p>
+              </div>
+              <Package className="h-8 w-8 text-muted-foreground" />
+            </div>
           </div>
-
-          {/* 업로드 진행 중 메시지 */}
-          {isUploading && (
-            <div className="p-3 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-none">
-              <p className="text-sm text-blue-700 dark:text-blue-300">
-                ⏳ Shopify에 상품을 등록하고 있습니다. 잠시만 기다려주세요...
-              </p>
-              <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
-                💡 상품이 많을수록 시간이 더 걸릴 수 있습니다.
-              </p>
-            </div>
-          )}
-
-          {/* 업로드 성공 메시지 */}
-          {uploadMessage && !isUploading && (
-            <div className="p-3 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-none">
-              <p className="text-sm text-green-700 dark:text-green-300">
-                ✅ {uploadMessage}
-              </p>
-              <p className="text-xs text-green-600 dark:text-green-400 mt-1">
-                💡 Shopify Dashboard에서 등록된 상품을 확인하세요.
-              </p>
-            </div>
-          )}
-
-          {/* 업로드 에러 메시지 */}
-          {uploadError && !isUploading && (
-            <div className="p-3 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-none">
-              <p className="text-sm text-red-700 dark:text-red-300">
-                ❌ {uploadError}
-              </p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Phase 2.13: ProductList 컴포넌트 통합 */}
-      <ProductList
-        products={products}
-        selectedIds={selectedIds}
-        onSelectionChange={setSelectedIds}
-        onMarginChange={handleMarginChange}
-        isLoading={isLoadingProducts}
-      />
+        </Link>
+      </div>
     </div>
   );
 }
-

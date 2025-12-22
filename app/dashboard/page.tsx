@@ -333,11 +333,11 @@ export default function DashboardPage() {
             </Button>
             <div>
               <h1 className="text-3xl font-bold mb-2">na-zak-zon V1</h1>
-              <p className="text-muted-foreground">
+        <p className="text-muted-foreground">
             
-              </p>
+        </p>
             </div>
-          </div>
+      </div>
 
       {/* 🚀 Quick Links (트렌드 숏컷) */}
       <div className="mb-6 p-4 bg-card rounded-none border">

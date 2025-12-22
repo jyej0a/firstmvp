@@ -25,7 +25,7 @@ import type { ScrapedProductRaw, Product } from "@/types";
 /**
  * Job 상태 타입
  */
-export type JobStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
+export type JobStatus = "pending" | "running" | "paused" | "completed" | "failed" | "cancelled";
 
 /**
  * Job Item 상태 타입
@@ -72,6 +72,7 @@ export interface JobProgress {
   failedCount: number;
   estimatedTimeRemaining: number; // 초 단위
   progressPercentage: number; // 0-100
+  startedAt: string | null; // 작업 시작 시간 (실 소요시간 계산용)
 }
 
 /**
@@ -187,17 +188,51 @@ async function processSequentialScraping(
 
     while (currentCount < totalTarget) {
       try {
-        // 취소 상태 체크 (루프 시작 시마다 확인)
+        // 취소/중지 상태 체크 (루프 시작 시마다 확인)
         const currentJob = await supabase
           .from("scraping_jobs")
-          .select("status")
+          .select("status, current_count, success_count, failed_count")
           .eq("id", jobId)
           .single();
 
-        if (currentJob.data?.status === "cancelled") {
+        const jobStatus = currentJob.data?.status;
+        
+        if (jobStatus === "cancelled") {
           console.log(`🛑 Job 취소 감지, 루프 종료`);
           console.groupEnd();
           return; // 루프 종료
+        }
+
+        if (jobStatus === "paused") {
+          console.log(`⏸️  Job 일시 중지 감지, 루프 대기 중...`);
+          // paused 상태면 1초마다 체크하여 재개 대기
+          while (true) {
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+            
+            const checkJob = await supabase
+              .from("scraping_jobs")
+              .select("status")
+              .eq("id", jobId)
+              .single();
+
+            if (checkJob.data?.status === "running") {
+              console.log(`▶️  Job 재개 감지, 루프 계속 진행`);
+              break; // 재개됨, 루프 계속
+            }
+
+            if (checkJob.data?.status === "cancelled") {
+              console.log(`🛑 Job 취소 감지, 루프 종료`);
+              console.groupEnd();
+              return; // 취소됨, 루프 종료
+            }
+          }
+        }
+
+        // DB에서 최신 카운트 가져오기 (재개 시 동기화)
+        if (currentJob.data) {
+          currentCount = currentJob.data.current_count || 0;
+          successCount = currentJob.data.success_count || 0;
+          failedCount = currentJob.data.failed_count || 0;
         }
 
         // Rate Limiting 체크 (1분당 1개)
@@ -274,6 +309,32 @@ async function processSequentialScraping(
                 throw new Error("상품 수집 실패: 결과가 null입니다");
               }
 
+              // ASIN 중복 체크 (수집 후 확인)
+              // TODO: 더 효율적으로 하려면 검색 결과 페이지에서 ASIN만 먼저 추출하여 체크
+              const { checkAsinExists } = await import("@/lib/utils/check-asin-exists");
+              const exists = await checkAsinExists(scrapedProduct.asin, userId);
+
+              if (exists) {
+                console.log(`⏭️  중복 ASIN 감지, 건너뜀: ${scrapedProduct.asin} (${scrapedProduct.title.substring(0, 50)}...)`);
+                
+                // Job Item 상태를 'failed'로 변경 (중복)
+                await supabase
+                  .from("scraping_job_items")
+                  .update({
+                    status: "failed",
+                    asin: scrapedProduct.asin,
+                    error_message: "이미 존재하는 ASIN (중복)",
+                  })
+                  .eq("id", jobItemId);
+
+                failedCount++;
+                currentCount++;
+                await updateJobProgress(jobId, currentCount, successCount, failedCount);
+                lastRequestTime = Date.now();
+                scrapedProduct = null; // 다음 단계로 진행하지 않음
+                break; // 재시도 루프 종료
+              }
+
               break; // 성공 시 루프 종료
             } catch (retryError) {
               retryCount++;
@@ -288,6 +349,11 @@ async function processSequentialScraping(
               console.log(`⏳ 재시도 ${retryCount}/${maxRetries} - ${delaySeconds}초 대기 중...`);
               await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1000));
             }
+          }
+
+          // 중복으로 인해 건너뛴 경우 다음 상품으로
+          if (!scrapedProduct) {
+            continue;
           }
 
           if (!scrapedProduct) {
@@ -769,6 +835,202 @@ export async function cancelJob(jobId: string): Promise<boolean> {
     return true;
   } catch (error) {
     console.error("❌ Job 취소 중 오류:", error);
+    console.groupEnd();
+    return false;
+  }
+}
+
+/**
+ * Job 일시 중지
+ *
+ * @param jobId - Job ID
+ * @returns 중지 성공 여부
+ */
+export async function pauseJob(jobId: string): Promise<boolean> {
+  console.group(`⏸️  [Sequential Scraper] Job ${jobId} 일시 중지 요청`);
+
+  try {
+    const supabase = getServiceRoleClient();
+
+    // Job 상태 확인
+    const jobInfo = await getJobInfo(jobId);
+    if (!jobInfo) {
+      console.error("❌ Job을 찾을 수 없습니다");
+      console.groupEnd();
+      return false;
+    }
+
+    // running 상태만 중지 가능
+    if (jobInfo.status !== "running") {
+      console.warn(`⚠️  Job이 ${jobInfo.status} 상태입니다. running 상태만 중지할 수 있습니다.`);
+      console.groupEnd();
+      return false;
+    }
+
+    // Job 상태를 'paused'로 변경
+    const pausedAt = new Date().toISOString();
+    const { error } = await supabase
+      .from("scraping_jobs")
+      .update({
+        status: "paused",
+        updated_at: pausedAt,
+      })
+      .eq("id", jobId);
+
+    if (error) {
+      console.error("❌ Job 중지 실패:", error);
+      console.groupEnd();
+      return false;
+    }
+
+    console.log(`✅ Job 중지 완료`);
+    console.log(`   중지 시점: ${pausedAt}`);
+    console.log(`   현재 수집된 상품: ${jobInfo.currentCount}개`);
+    console.groupEnd();
+
+    return true;
+  } catch (error) {
+    console.error("❌ Job 중지 중 오류:", error);
+    console.groupEnd();
+    return false;
+  }
+}
+
+/**
+ * Job 재개 (이어서 수집)
+ *
+ * @param jobId - Job ID
+ * @returns 재개 성공 여부
+ */
+export async function resumeJob(jobId: string): Promise<boolean> {
+  console.group(`▶️  [Sequential Scraper] Job ${jobId} 재개 요청 (이어서 수집)`);
+
+  try {
+    const supabase = getServiceRoleClient();
+
+    // Job 상태 확인
+    const jobInfo = await getJobInfo(jobId);
+    if (!jobInfo) {
+      console.error("❌ Job을 찾을 수 없습니다");
+      console.groupEnd();
+      return false;
+    }
+
+    // paused 상태만 재개 가능
+    if (jobInfo.status !== "paused") {
+      console.warn(`⚠️  Job이 ${jobInfo.status} 상태입니다. paused 상태만 재개할 수 있습니다.`);
+      console.groupEnd();
+      return false;
+    }
+
+    // Job 상태를 'running'으로 변경
+    const resumedAt = new Date().toISOString();
+    const { error } = await supabase
+      .from("scraping_jobs")
+      .update({
+        status: "running",
+        updated_at: resumedAt,
+      })
+      .eq("id", jobId);
+
+    if (error) {
+      console.error("❌ Job 재개 실패:", error);
+      console.groupEnd();
+      return false;
+    }
+
+    // processSequentialScraping 재시작 (현재 진행 상황 유지)
+    // 백그라운드에서 비동기로 실행
+    processSequentialScraping(
+      jobId,
+      jobInfo.userId,
+      jobInfo.searchInput,
+      jobInfo.totalTarget
+    ).catch((error) => {
+      console.error("❌ Job 재개 후 처리 중 오류:", error);
+    });
+
+    console.log(`✅ Job 재개 완료`);
+    console.log(`   재개 시점: ${resumedAt}`);
+    console.log(`   이어서 수집: ${jobInfo.currentCount}개부터 계속`);
+    console.groupEnd();
+
+    return true;
+  } catch (error) {
+    console.error("❌ Job 재개 중 오류:", error);
+    console.groupEnd();
+    return false;
+  }
+}
+
+/**
+ * Job 재시작 (처음부터 다시 수집)
+ *
+ * @param jobId - Job ID
+ * @returns 재시작 성공 여부
+ */
+export async function restartJob(jobId: string): Promise<boolean> {
+  console.group(`🔄 [Sequential Scraper] Job ${jobId} 재시작 요청 (처음부터 다시)`);
+
+  try {
+    const supabase = getServiceRoleClient();
+
+    // Job 상태 확인
+    const jobInfo = await getJobInfo(jobId);
+    if (!jobInfo) {
+      console.error("❌ Job을 찾을 수 없습니다");
+      console.groupEnd();
+      return false;
+    }
+
+    // paused 또는 cancelled 상태만 재시작 가능
+    if (jobInfo.status !== "paused" && jobInfo.status !== "cancelled") {
+      console.warn(`⚠️  Job이 ${jobInfo.status} 상태입니다. paused 또는 cancelled 상태만 재시작할 수 있습니다.`);
+      console.groupEnd();
+      return false;
+    }
+
+    // 카운트 초기화 및 상태를 'running'으로 변경
+    const restartedAt = new Date().toISOString();
+    const { error } = await supabase
+      .from("scraping_jobs")
+      .update({
+        status: "running",
+        current_count: 0,
+        success_count: 0,
+        failed_count: 0,
+        started_at: restartedAt,
+        completed_at: null,
+        error_message: null,
+        updated_at: restartedAt,
+      })
+      .eq("id", jobId);
+
+    if (error) {
+      console.error("❌ Job 재시작 실패:", error);
+      console.groupEnd();
+      return false;
+    }
+
+    // processSequentialScraping 재시작 (처음부터)
+    // 백그라운드에서 비동기로 실행
+    processSequentialScraping(
+      jobId,
+      jobInfo.userId,
+      jobInfo.searchInput,
+      jobInfo.totalTarget
+    ).catch((error) => {
+      console.error("❌ Job 재시작 후 처리 중 오류:", error);
+    });
+
+    console.log(`✅ Job 재시작 완료`);
+    console.log(`   재시작 시점: ${restartedAt}`);
+    console.log(`   처음부터 다시 수집 시작`);
+    console.groupEnd();
+
+    return true;
+  } catch (error) {
+    console.error("❌ Job 재시작 중 오류:", error);
     console.groupEnd();
     return false;
   }

@@ -58,17 +58,32 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const limit = parseInt(searchParams.get("limit") || "50", 10);
     const offset = parseInt(searchParams.get("offset") || "0", 10);
+    const status = searchParams.get("status"); // status 필터링 추가
 
-    console.log(`📊 조회 조건: limit=${limit}, offset=${offset}`);
+    console.log(`📊 조회 조건: limit=${limit}, offset=${offset}, status=${status || "all"}`);
 
     // 3. Supabase 클라이언트 생성
     const supabase = getServiceRoleClient();
 
-    // 4. 전체 개수 조회 (페이지네이션용)
-    const { count, error: countError } = await supabase
+    // 4. 쿼리 빌더 생성
+    let countQuery = supabase
       .from("products")
       .select("*", { count: "exact", head: true })
       .eq("user_id", userId);
+
+    let dataQuery = supabase
+      .from("products")
+      .select("*")
+      .eq("user_id", userId);
+
+    // 5. status 필터링 적용
+    if (status) {
+      countQuery = countQuery.eq("status", status);
+      dataQuery = dataQuery.eq("status", status);
+    }
+
+    // 6. 전체 개수 조회 (페이지네이션용)
+    const { count, error: countError } = await countQuery;
 
     if (countError) {
       console.error("❌ 개수 조회 실패:", countError);
@@ -86,11 +101,8 @@ export async function GET(request: NextRequest) {
     const total = count || 0;
     console.log(`📦 총 상품 개수: ${total}개`);
 
-    // 5. 상품 목록 조회
-    const { data, error } = await supabase
-      .from("products")
-      .select("*")
-      .eq("user_id", userId)
+    // 7. 상품 목록 조회
+    const { data, error } = await dataQuery
       .order("created_at", { ascending: false })
       .range(offset, offset + limit - 1);
 

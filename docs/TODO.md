@@ -2,7 +2,7 @@
 
 **개발 목표:** 2026-01-10 (MVP 1.0 Launch)  
 **문서 버전:** v3.2 (Phase 2.5 순차 처리 구현 추가)  
-**최종 수정:** 2024-12-15
+**최종 수정:** 2025-12-22
 
 > 💡 **개발 원칙:** 사용자 플로우를 따라 점진적으로 구현하고, 각 단계마다 실제로 동작하는 것을 확인한 후 다음 단계로 진행한다.
 
@@ -574,6 +574,23 @@ US 타입 기준 마진율로 판매가 자동 계산 (MVP 1.0 범위)
   - [x] Shopify 등록 실패 시 재시도 로직 (최대 1회)
   - [x] 각 단계별 try-catch 및 에러 메시지 저장
 
+### 2.25.5 사이드바 페이지네이션 구조 (12/30 - 12/31, 1일) ✅ 완료
+
+- [x] `app/dashboard-v2/layout.tsx` 생성 (사이드바 포함 공통 레이아웃) ✅ **완료**
+- [x] 사이드바 컴포넌트 분리 (`components/Sidebar.tsx` 또는 layout 내부 구현) ✅ **완료** (layout 내부 구현)
+- [x] Next.js App Router 기반 페이지 구조 생성 ✅ **완료**
+  - [x] `app/dashboard-v2/page.tsx` (Dashboard - 현재 내용 유지, 사이드바 코드 제거) ✅ **완료**
+  - [x] `app/dashboard-v2/scrape/page.tsx` (Start Scraping 페이지) ✅ **완료**
+  - [x] `app/dashboard-v2/products/page.tsx` (Product List 페이지) ✅ **완료**
+  - [x] `app/dashboard-v2/margin-rate/page.tsx` (Margin Rate 페이지) ✅ **완료**
+  - [x] `app/dashboard-v2/editor/page.tsx` (Editor 페이지) ✅ **완료**
+  - [x] `app/dashboard-v2/history/page.tsx` (History 페이지) ✅ **완료**
+- [x] 사이드바에서 `Link` 컴포넌트로 라우팅 ✅ **완료**
+- [x] `usePathname`으로 현재 페이지 하이라이트 ✅ **완료**
+- [x] 반응형 사이드바 동작 확인 (모바일/데스크톱) ✅ **완료**
+- [x] 기존 V2 페이지 내용을 Dashboard 페이지로 이동 ✅ **완료**
+- [x] 사이드바 레이아웃 구조 개선 (flex-col, overflow-y-auto) ✅ **완료**
+
 ### 2.26 CN 타입 가격 계산 (12/31 - 01/02, 2일) 🔄 진행 중
 
 - [ ] Cost Price 입력 필드 추가
@@ -595,12 +612,75 @@ US 타입 기준 마진율로 판매가 자동 계산 (MVP 1.0 범위)
 
 ### 2.28 스크래핑 요소 추가 (01/03 - 01/04, 2일) 🔄 진행 중
 
-- [ ] 리뷰수 수집 로직 추가
-- [ ] 평점 수집 로직 추가
-- [ ] DB 스키마 확장 (필요시)
-  - [ ] `products` 테이블에 `review_count`, `rating` 컬럼 추가
-- [ ] 스크래퍼 로직 업데이트 (`lib/scraper/amazon-scraper.ts`)
-- [ ] UI 표시 (ProductList 컴포넌트)
+- [ ] **2-11-1. 현재 스크래핑 요소 항목 점검**
+  - [ ] amazon-scraper.ts 코드 분석하여 현재 수집되는 항목과 미수집 항목 정리
+  - [ ] ASIN, 제목, 이미지, 가격, URL 확인
+  - [ ] 카테고리, description, 리뷰수, 평점 미수집 확인
+- [ ] **2-11-2. DB 스키마 확장 - 카테고리 컬럼 추가**
+  - [ ] products 테이블에 category TEXT 컬럼 추가하는 마이그레이션 작성
+  - [ ] nullable로 추가
+- [ ] **2-11-3. DB 스키마 확장 - 리뷰수 평점 컬럼 추가**
+  - [ ] products 테이블에 review_count INTEGER, rating DECIMAL 컬럼 추가하는 마이그레이션 작성
+  - [ ] nullable로 추가, rating은 0-5 범위
+- [ ] **2-11-4. 타입 정의 업데이트**
+  - [ ] ScrapedProductRaw와 Product 인터페이스에 category, reviewCount, rating 필드 추가
+  - [ ] types/index.ts 파일 수정
+- [ ] **2-11-5. 카테고리 수집 로직 추가**
+  - [ ] 아마존 상세 페이지에서 카테고리 정보 추출하는 로직 구현
+  - [ ] 상세 페이지 접속 후 카테고리 경로 추출
+- [ ] **2-11-6. 상세페이지 description 수집 로직 추가**
+  - [ ] 아마존 상세 페이지에서 상품 설명 추출하는 함수 구현
+  - [ ] productDescription 섹션에서 HTML 또는 텍스트 추출
+- [ ] **2-11-7. 리뷰수 수집 로직 추가**
+  - [ ] 아마존 상세 페이지에서 리뷰 개수 추출하는 로직 구현
+  - [ ] 검색 결과 페이지 또는 상세 페이지에서 추출
+- [ ] **2-11-8. 평점 수집 로직 추가**
+  - [ ] 아마존 상세 페이지에서 평점 추출하는 로직 구현
+  - [ ] 별점 정보 추출 (예: 4.5 out of 5)
+- [ ] **2-11-9. 이미지 수집 개선**
+  - [ ] 이미지 수집 로직 개선하여 중복 제거 및 고해상도 이미지 우선 수집
+  - [ ] 상세 페이지 이미지 갤러리에서 고품질 이미지 우선 추출
+- [ ] **2-11-10. 스크래퍼 로직 통합**
+  - [ ] scrapeSingleProduct 함수에 새로 추가한 수집 로직 통합
+  - [ ] 카테고리, description, 리뷰수, 평점을 상세 페이지에서 한 번에 수집
+- [ ] **2-11-11. DB 저장 로직 업데이트**
+  - [ ] save-products.ts에서 새로 추가한 필드들을 DB에 저장하도록 수정
+  - [ ] category, review_count, rating 필드 포함하여 저장
+- [ ] **2-11-12. UI 표시 - ProductList 컴포넌트**
+  - [ ] ProductList 컴포넌트에 카테고리, 리뷰수, 평점 표시 추가
+  - [ ] 테이블 또는 카드 형태로 표시
+- [ ] **2-11-13. 통합 테스트**
+  - [ ] 전체 스크래핑 플로우 테스트하여 모든 필드가 정상적으로 수집되는지 확인
+  - [ ] 실제 아마존 상품으로 테스트
+
+### 2.29 수집 중지 및 재개 기능 구현 (01/04 - 01/05, 2일) 🔄 진행 중
+
+- [ ] DB 스키마 업데이트 (`paused` 상태 추가)
+  - [ ] `scraping_jobs` 테이블의 `status` 제약조건에 `paused` 추가
+- [ ] `JobStatus` 타입에 `paused` 추가 (`lib/scraper/sequential-scraper.ts`)
+- [ ] `pauseJob()` 함수 구현
+  - [ ] Job 상태를 `paused`로 변경
+  - [ ] 현재 진행 상황 유지
+- [ ] `resumeJob()` 함수 구현 (이어서 수집)
+  - [ ] `paused` → `running` 상태 전환
+  - [ ] `currentCount` 유지하여 기존 `processSequentialScraping` 재개
+- [ ] `restartJob()` 함수 구현 (처음부터 다시)
+  - [ ] `currentCount`, `successCount`, `failedCount` 초기화
+  - [ ] `paused` → `running` 상태 전환
+  - [ ] 새로운 `processSequentialScraping` 시작
+- [ ] PATCH `/api/scrape/[jobId]` API 엔드포인트 생성
+  - [ ] Request Body: `{ action: 'pause' | 'resume' | 'restart', resumeMode?: 'continue' | 'restart' }`
+  - [ ] 사용자 권한 확인
+  - [ ] 각 action에 따른 함수 호출
+- [ ] `ScrapingProgress` 컴포넌트에 중지 버튼 추가
+  - [ ] `running` 상태일 때만 표시
+  - [ ] 클릭 시 PATCH API 호출
+- [ ] 재개 옵션 선택 UI (모달/다이얼로그) 추가
+  - [ ] `paused` 상태일 때 "재개" 버튼 표시
+  - [ ] 클릭 시 "이어서 수집" / "처음부터 다시 수집" 선택 옵션 제공
+- [ ] 중지된 Job 상태 표시 및 재개 버튼 추가
+  - [ ] `paused` 상태 UI 표시
+  - [ ] 재개 버튼 클릭 시 선택 옵션 모달 표시
 
 ### ✅ Phase 2.5 완료 조건
 
@@ -608,6 +688,9 @@ US 타입 기준 마진율로 판매가 자동 계산 (MVP 1.0 범위)
 - [x] API 및 진행 상황 조회 기능 구현 완료 ✅ **2024-12-15 완료**
 - [x] 진행 상황 UI 통합 완료 ✅ **2024-12-15 완료**
 - [x] 에러 처리 및 재시도 로직 구현 완료 ✅ **2024-12-15 완료**
+- [ ] 수집 중지 기능 동작 확인
+- [ ] 재개 시 이어서 수집 동작 확인
+- [ ] 재개 시 처음부터 다시 수집 동작 확인
 - [ ] CN 타입 가격 계산 구현 완료
 - [ ] 타오바오 이미지 검색 브릿지 재구현 완료
 - [ ] 스크래핑 요소 추가 완료 (리뷰수, 평점)
@@ -895,9 +978,11 @@ US 타입 기준 마진율로 판매가 자동 계산 (MVP 1.0 범위)
   - ✅ components/ScrapingProgress.tsx 생성 (진행 상황 UI) **2024-12-15 완료**
   - ✅ app/dashboard/page.tsx 수정 (대시보드 통합) **2024-12-15 완료**
   - ✅ 에러 처리 및 재시도 로직 강화 **2024-12-15 완료**
+  - ✅ 사이드바 페이지네이션 구조 (2.25.5) 완료 **2024-12-21 완료**
   - 🔄 CN 타입 가격 계산 (2.26) 진행 중
   - 🔄 타오바오 이미지 검색 브릿지 재구현 (2.27) 진행 중
   - 🔄 스크래핑 요소 추가 (2.28) 진행 중
+  - 🔄 수집 중지 및 재개 기능 (2.29) 진행 중
 - 🔄 Phase 0-3 예정 (PG 연동 시작)
 
 **다음 작업:** Phase 3 (E2E 테스트 & 런칭) 시작
