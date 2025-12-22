@@ -37,6 +37,7 @@ interface DashboardStats {
       status: string;
       successCount: number;
       failedCount: number;
+      productCount?: number; // Job에 속한 상품 개수 (선택사항)
       createdAt: string;
     }>;
   };
@@ -281,9 +282,9 @@ export default function DashboardPage() {
         </div>
         {stats.jobs.recent.length > 0 ? (
           <div className="space-y-2">
-            {stats.jobs.recent.map((job) => (
+            {stats.jobs.recent.map((job, index) => (
               <div
-                key={job.id}
+                key={job.id || `job-${index}`}
                 className="flex items-center justify-between p-3 border border-border rounded-none hover:bg-muted/50"
               >
                 <div className="flex items-center gap-4">
@@ -305,6 +306,11 @@ export default function DashboardPage() {
                   </span>
                 </div>
                 <div className="flex items-center gap-4 text-sm">
+                  {job.productCount !== undefined && (
+                    <span className="text-muted-foreground">
+                      Products: {job.productCount}
+                    </span>
+                  )}
                   <span className="text-green-600 dark:text-green-400">
                     Success: {job.successCount}
                   </span>

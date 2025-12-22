@@ -34,6 +34,9 @@ export interface ScraperOptions {
 
   /** 상세 로그 출력 여부 (기본값: false) */
   verbose?: boolean;
+
+  /** 영어 강제 설정 (V1 전용, 한글 상품명 방지) */
+  forceEnglish?: boolean;
 }
 
 /**
@@ -78,7 +81,8 @@ async function initBrowser(headless: boolean = true): Promise<Browser> {
  */
 async function initPage(
   browser: Browser,
-  timeout: number = 60000
+  timeout: number = 60000,
+  options?: { forceEnglish?: boolean }
 ): Promise<Page> {
   const page = await browser.newPage();
 
@@ -86,6 +90,23 @@ async function initPage(
   await page.setUserAgent(
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
   );
+
+  // 언어 설정 (한글 상품명 방지 - V1 전용)
+  if (options?.forceEnglish) {
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'en-US,en;q=0.9',
+    });
+    
+    // 브라우저 언어 설정도 영어로 강제
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'language', {
+        get: () => 'en-US',
+      });
+      Object.defineProperty(navigator, 'languages', {
+        get: () => ['en-US', 'en'],
+      });
+    });
+  }
 
   // 뷰포트 설정
   await page.setViewport({
@@ -188,6 +209,9 @@ async function extractProductsFromPage(
     if (productElements.length === 0) {
       if (verboseMode) {
         console.warn("⚠️  상품 요소를 찾을 수 없습니다");
+        console.warn(`   - 시도한 selector: ${selectors.join(", ")}`);
+        console.warn(`   - 현재 URL: ${window.location.href}`);
+        console.warn(`   - 페이지 제목: ${document.title}`);
       }
       return [];
     }
@@ -324,22 +348,45 @@ async function extractProductsFromPage(
           ? `https://www.amazon.com${relativeUrl}`
           : "";
 
-        // 유효성 검증 (가격이 0보다 커야 함)
-        if (asin && title && sourceUrl && images.length > 0 && amazonPrice > 0) {
+        // 유효성 검증 (최소 필수 조건만 체크 - null 반환 방지)
+        // 필수: ASIN, 제목, URL
+        // 선택: 이미지, 가격 (없어도 허용, 나중에 수정 가능)
+        if (asin && title && sourceUrl) {
+          // 이미지가 없으면 빈 배열로 설정 (상세 페이지에서 수집 가능)
+          const finalImages = images.length > 0 ? images : [];
+          
+          // 가격이 0이거나 없으면 기본값 설정 (나중에 수정 가능)
+          const finalPrice = amazonPrice > 0 ? amazonPrice : 0.01;
+          
           scrapedProducts.push({
             asin,
             title,
-            images,
-            amazonPrice,
+            images: finalImages,
+            amazonPrice: finalPrice,
             sourceUrl,
           });
 
           if (verboseMode && index < 3) {
-            console.log(`  ${index + 1}. ${title} (${asin}) - $${amazonPrice.toFixed(2)}`);
+            console.log(`  ${index + 1}. ${title} (${asin}) - $${finalPrice.toFixed(2)}`);
+            if (images.length === 0) {
+              console.warn(`     ⚠️  이미지 없음 (상세 페이지에서 수집 시도 예정)`);
+            }
+            if (amazonPrice <= 0) {
+              console.warn(`     ⚠️  가격 없음 (기본값 $0.01 설정, 나중에 수정 필요)`);
+            }
           }
-        } else if (verboseMode && asin && title && amazonPrice <= 0) {
-          // 가격이 0 이하인 경우 디버그 로그
-          console.warn(`  ⚠️  가격 누락으로 건너뜀: ${title.substring(0, 50)}... (${asin})`);
+        } else {
+          // 디버깅: 왜 상품이 제외되었는지 로그 (ASIN, 제목, URL이 없는 경우만)
+          if (verboseMode) {
+            const reasons = [];
+            if (!asin) reasons.push("ASIN 없음");
+            if (!title) reasons.push("제목 없음");
+            if (!sourceUrl) reasons.push("URL 없음");
+            
+            if (reasons.length > 0 && index < 5) {
+              console.warn(`  ⚠️  상품 ${index + 1} 건너뜀: ${reasons.join(", ")} (필수 조건 미충족)`);
+            }
+          }
         }
       } catch (error) {
         console.error("상품 추출 중 에러:", error);
@@ -350,6 +397,13 @@ async function extractProductsFromPage(
   }, verbose);
 
   console.log(`✅ ${products.length}개 상품 추출 완료`);
+  
+  if (products.length === 0 && verbose) {
+    console.warn("⚠️  페이지에서 상품을 추출하지 못했습니다.");
+    console.warn("   - 페이지 구조가 변경되었을 수 있습니다");
+    console.warn("   - Bot detection으로 차단되었을 수 있습니다");
+    console.warn("   - 페이지 로딩이 완료되지 않았을 수 있습니다");
+  }
 
   // 이미지 중복 제거 적용 (검색 결과 페이지 내에서)
   const { deduplicateImages } = await import("@/lib/utils/image-deduplicator");
@@ -520,23 +574,52 @@ export async function scrapeSingleProduct(
       });
     }
 
-    // 4. 페이지에서 상품 목록 추출
+    // 4. 페이지 로딩 후 추가 대기 (동적 콘텐츠 로딩 대기)
+    // 스크롤을 내려서 lazy loading된 콘텐츠 로드
+    await page.evaluate(() => {
+      window.scrollTo(0, document.body.scrollHeight / 2);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 2000)); // 2초 추가 대기
+    
+    // 다시 위로 스크롤 (상품 목록이 보이도록)
+    await page.evaluate(() => {
+      window.scrollTo(0, 0);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 1000)); // 1초 추가 대기
+
+    // 5. 페이지에서 상품 목록 추출
     const products = await extractProductsFromPage(page, verbose);
 
     if (products.length === 0) {
-      console.warn("⚠️  페이지에 상품이 없습니다");
+      console.warn(`⚠️  페이지에 상품이 없습니다 (offset: ${offset}, 페이지: ${targetPage})`);
+      console.warn(`   - URL: ${page.url()}`);
+      console.warn(`   - 페이지 로딩 상태 확인 필요`);
       return null;
     }
 
-    // 5. 해당 인덱스의 상품 반환
+    // 6. 해당 인덱스의 상품 반환
+    let product: ScrapedProductRaw;
+    
     if (targetIndex >= products.length) {
       console.warn(
-        `⚠️  인덱스 ${targetIndex}가 범위를 벗어남 (페이지 상품 수: ${products.length})`
+        `⚠️  인덱스 ${targetIndex}가 범위를 벗어남 (페이지 상품 수: ${products.length}, offset: ${offset})`
       );
-      return null;
+      console.warn(`   - 페이지에는 ${products.length}개의 유효한 상품만 추출됨`);
+      console.warn(`   - 필터링 과정에서 일부 상품이 제외되었을 수 있음`);
+      console.warn(`   - 요청한 인덱스: ${targetIndex}, 추출된 상품 수: ${products.length}`);
+      
+      // null을 반환하지 않고, 가장 가까운 유효한 상품 반환 (마지막 상품)
+      if (products.length > 0) {
+        console.warn(`   - 대신 마지막 유효한 상품 반환 (인덱스: ${products.length - 1})`);
+        product = products[products.length - 1];
+      } else {
+        // 상품이 하나도 없으면 null 반환 (이 경우는 재시도 필요)
+        console.warn(`   - 유효한 상품이 없어 null 반환`);
+        return null;
+      }
+    } else {
+      product = products[targetIndex];
     }
-
-    const product = products[targetIndex];
 
     // 상세 페이지에서 추가 이미지 수집
     if (product.sourceUrl) {
@@ -625,12 +708,23 @@ export async function scrapeAmazonProducts(
     // 1. 브라우저 초기화
     browser = await initBrowser(headless);
 
-    // 2. 페이지 생성 및 설정
-    const page = await initPage(browser, timeout);
+    // 2. 페이지 생성 및 설정 (V1: 영어 강제 설정)
+    const page = await initPage(browser, timeout, { forceEnglish: options.forceEnglish });
 
-    // 3. 첫 페이지 접속
+    // 3. 첫 페이지 접속 (언어 파라미터 추가 - V1 전용)
     console.log("🌍 아마존 검색 페이지 접속 중...");
-    await page.goto(searchUrl, {
+    const finalUrl = options.forceEnglish 
+      ? (() => {
+          const url = new URL(searchUrl);
+          // 언어 파라미터 추가 (없는 경우에만)
+          if (!url.searchParams.has('language')) {
+            url.searchParams.set('language', 'en_US');
+          }
+          return url.toString();
+        })()
+      : searchUrl;
+    
+    await page.goto(finalUrl, {
       waitUntil: "networkidle2",
       timeout,
     });

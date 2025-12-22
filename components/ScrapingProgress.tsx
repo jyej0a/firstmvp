@@ -15,8 +15,16 @@
 
 import { useEffect, useState } from "react";
 import { useScrapingProgress } from "@/hooks/use-scraping-progress";
-import { Loader2, CheckCircle2, XCircle, Clock, Square } from "lucide-react";
+import { Loader2, CheckCircle2, XCircle, Clock, Square, Pause, Play, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 /**
  * ScrapingProgress 컴포넌트 Props
@@ -39,7 +47,7 @@ export interface ScrapingProgressProps {
  * 시간 포맷팅 함수
  *
  * @param seconds - 초 단위 시간
- * @returns 포맷팅된 시간 문자열 (예: "1시간 30분")
+ * @returns 포맷팅된 시간 문자열 (예: "1시간 30분 45초")
  */
 function formatTime(seconds: number): string {
   if (seconds < 60) {
@@ -48,12 +56,22 @@ function formatTime(seconds: number): string {
 
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
 
+  const parts: string[] = [];
+  
   if (hours > 0) {
-    return `${hours}시간 ${minutes}분`;
+    parts.push(`${hours}시간`);
   }
+  
+  if (minutes > 0) {
+    parts.push(`${minutes}분`);
+  }
+  
+  // 초는 항상 표시 (1분 이상이어도)
+  parts.push(`${secs}초`);
 
-  return `${minutes}분`;
+  return parts.join(' ');
 }
 
 /**
@@ -65,8 +83,35 @@ export default function ScrapingProgress({
   apiPath = '/api/scrape',
   onComplete,
 }: ScrapingProgressProps) {
-  const { progress, isLoading, error } = useScrapingProgress(jobId, pollingInterval, apiPath);
+  const { progress, isLoading, error, refetch } = useScrapingProgress(jobId, pollingInterval, apiPath);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [isPausing, setIsPausing] = useState(false);
+  const [isResuming, setIsResuming] = useState(false);
+  const [showResumeDialog, setShowResumeDialog] = useState(false);
+  const [elapsedTime, setElapsedTime] = useState<number>(0); // 초 단위
+
+  // 실 소요시간 계산 (초 단위로 업데이트)
+  useEffect(() => {
+    if (!progress?.startedAt) {
+      setElapsedTime(0);
+      return;
+    }
+
+    const updateElapsedTime = () => {
+      const startTime = new Date(progress.startedAt!).getTime();
+      const now = Date.now();
+      const elapsed = Math.floor((now - startTime) / 1000); // 초 단위
+      setElapsedTime(elapsed);
+    };
+
+    // 즉시 한 번 계산
+    updateElapsedTime();
+
+    // 1초마다 업데이트
+    const interval = setInterval(updateElapsedTime, 1000);
+
+    return () => clearInterval(interval);
+  }, [progress?.startedAt]);
 
   // 완료 시 콜백 호출 (useEffect로 한 번만 호출되도록 처리)
   useEffect(() => {
@@ -95,11 +140,74 @@ export default function ScrapingProgress({
       }
 
       console.log("✅ Job 취소 완료");
+      refetch(); // 상태 새로고침
     } catch (error) {
       console.error("❌ Job 취소 실패:", error);
       alert(error instanceof Error ? error.message : "Job 취소에 실패했습니다.");
     } finally {
       setIsCancelling(false);
+    }
+  };
+
+  // Job 일시 중지 핸들러
+  const handlePause = async () => {
+    setIsPausing(true);
+
+    try {
+      const response = await fetch(`${apiPath}/${jobId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ action: "pause" }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Job 중지에 실패했습니다.");
+      }
+
+      console.log("✅ Job 중지 완료");
+      refetch(); // 상태 새로고침
+    } catch (error) {
+      console.error("❌ Job 중지 실패:", error);
+      alert(error instanceof Error ? error.message : "Job 중지에 실패했습니다.");
+    } finally {
+      setIsPausing(false);
+    }
+  };
+
+  // Job 재개 핸들러 (이어서 수집)
+  const handleResume = async (restart: boolean = false) => {
+    setIsResuming(true);
+    setShowResumeDialog(false);
+
+    try {
+      const response = await fetch(`${apiPath}/${jobId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "resume",
+          resumeMode: restart ? "restart" : "continue",
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Job 재개에 실패했습니다.");
+      }
+
+      console.log(`✅ Job 재개 완료 (${restart ? "처음부터 다시" : "이어서 수집"})`);
+      refetch(); // 상태 새로고침
+    } catch (error) {
+      console.error("❌ Job 재개 실패:", error);
+      alert(error instanceof Error ? error.message : "Job 재개에 실패했습니다.");
+    } finally {
+      setIsResuming(false);
     }
   };
 
@@ -141,6 +249,7 @@ export default function ScrapingProgress({
   const statusConfig = {
     pending: { icon: Clock, color: "text-muted-foreground", label: "대기 중" },
     running: { icon: Loader2, color: "text-blue-500", label: "진행 중", animate: true },
+    paused: { icon: Pause, color: "text-yellow-500", label: "일시 중지" },
     completed: { icon: CheckCircle2, color: "text-green-500", label: "완료" },
     failed: { icon: XCircle, color: "text-destructive", label: "실패" },
     cancelled: { icon: XCircle, color: "text-muted-foreground", label: "취소됨" },
@@ -160,6 +269,7 @@ export default function ScrapingProgress({
         </div>
         <p className="text-sm text-muted-foreground">
           {progress.status === "running" && "상품을 순차적으로 수집하고 있습니다..."}
+          {progress.status === "paused" && "수집 작업이 일시 중지되었습니다."}
           {progress.status === "completed" && "모든 상품 수집이 완료되었습니다!"}
           {progress.status === "failed" && "수집 중 오류가 발생했습니다."}
           {progress.status === "pending" && "작업이 시작되기를 기다리는 중..."}
@@ -182,11 +292,19 @@ export default function ScrapingProgress({
       </div>
 
         {/* 통계 */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-3 gap-4">
           <div>
             <div className="text-sm text-muted-foreground">수집된 상품</div>
             <div className="text-2xl font-bold">
               {progress.currentCount} / {progress.totalTarget}
+            </div>
+          </div>
+          <div>
+            <div className="text-sm text-muted-foreground">실 소요시간</div>
+            <div className="text-2xl font-bold">
+              {progress.startedAt && elapsedTime > 0
+                ? formatTime(elapsedTime)
+                : "-"}
             </div>
           </div>
           <div>
@@ -215,9 +333,56 @@ export default function ScrapingProgress({
         </div>
       </div>
 
-      {/* 중단 버튼 (진행 중일 때만 표시) */}
-      {progress.status === "running" && (
-        <div className="pt-2 border-t">
+      {/* 버튼 영역 */}
+      <div className="pt-2 border-t space-y-2">
+        {/* 진행 중일 때: 일시 중지 버튼 */}
+        {progress.status === "running" && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handlePause}
+            disabled={isPausing}
+            className="w-full"
+          >
+            {isPausing ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                중지 중...
+              </>
+            ) : (
+              <>
+                <Pause className="h-4 w-4 mr-2" />
+                수집 중지
+              </>
+            )}
+          </Button>
+        )}
+
+        {/* 일시 중지 상태일 때: 재개 버튼 */}
+        {progress.status === "paused" && (
+          <Button
+            variant="default"
+            size="sm"
+            onClick={() => setShowResumeDialog(true)}
+            disabled={isResuming}
+            className="w-full"
+          >
+            {isResuming ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                재개 중...
+              </>
+            ) : (
+              <>
+                <Play className="h-4 w-4 mr-2" />
+                수집 재개
+              </>
+            )}
+          </Button>
+        )}
+
+        {/* 취소 버튼 (진행 중 또는 일시 중지 상태일 때) */}
+        {(progress.status === "running" || progress.status === "paused") && (
           <Button
             variant="destructive"
             size="sm"
@@ -237,8 +402,59 @@ export default function ScrapingProgress({
               </>
             )}
           </Button>
-        </div>
-      )}
+        )}
+      </div>
+
+      {/* 재개 옵션 선택 다이얼로그 */}
+      <Dialog open={showResumeDialog} onOpenChange={setShowResumeDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>수집 재개 옵션 선택</DialogTitle>
+            <DialogDescription>
+              수집을 어떻게 재개하시겠습니까?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Button
+              variant="outline"
+              className="w-full justify-start"
+              onClick={() => handleResume(false)}
+              disabled={isResuming}
+            >
+              <Play className="h-4 w-4 mr-2" />
+              <div className="text-left">
+                <div className="font-semibold">이어서 수집</div>
+                <div className="text-xs text-muted-foreground">
+                  현재 {progress.currentCount}개부터 계속 수집합니다.
+                </div>
+              </div>
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full justify-start"
+              onClick={() => handleResume(true)}
+              disabled={isResuming}
+            >
+              <RotateCcw className="h-4 w-4 mr-2" />
+              <div className="text-left">
+                <div className="font-semibold">처음부터 다시 수집</div>
+                <div className="text-xs text-muted-foreground">
+                  카운트를 초기화하고 처음부터 다시 수집합니다.
+                </div>
+              </div>
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setShowResumeDialog(false)}
+              disabled={isResuming}
+            >
+              취소
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

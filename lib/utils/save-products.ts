@@ -125,7 +125,7 @@ export async function saveProductsToDatabase(
         ? { options: product.variants }
         : null;
 
-      // DB에 저장 (UPSERT)
+      // DB에 저장 (UPSERT) - ASIN만 unique 제약 사용
       const { error } = await supabase.from("products").upsert(
         {
           user_id: finalUserId,
@@ -141,6 +141,12 @@ export async function saveProductsToDatabase(
           selling_price: sellingPrice,
           status: "draft", // 초기 상태: draft
           error_message: null,
+          category: product.category || 'General', // V1: 카테고리 필드 추가
+          // 추가 필드들 (nullable, 스크래핑 시 수집한 경우에만 저장)
+          review_count: product.reviewCount ?? null,
+          rating: product.rating ?? null,
+          brand: product.brand ?? null,
+          weight: product.weight ?? null,
         },
         {
           onConflict: "asin", // ASIN이 중복되면 업데이트

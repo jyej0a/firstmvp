@@ -115,11 +115,12 @@ export async function POST(request: NextRequest) {
 
     console.log(`🔗 검색 URL: ${searchUrl}`);
 
-    // 6. 일괄 수집 (30개)
+    // 6. 일괄 수집 (30개) - V1: 영어 강제 설정으로 한글 상품명 방지
     console.log("🚀 일괄 수집 시작...");
     const scrapeResult = await scrapeAmazonProducts(searchUrl, {
       maxProducts: 30,
       verbose: true,
+      forceEnglish: true, // V1 전용: 영어 강제 설정
     });
 
     console.log(`✅ 수집 완료: ${scrapeResult.products.length}개`);

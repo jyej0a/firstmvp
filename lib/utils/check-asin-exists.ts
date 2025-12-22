@@ -12,12 +12,10 @@ import { getServiceRoleClient } from '@/lib/supabase/service-role';
  * ASIN이 DB에 이미 존재하는지 확인
  * 
  * @param asin - 확인할 ASIN
- * @param userId - 사용자 ID
  * @returns 존재 여부 (true: 이미 존재, false: 존재하지 않음)
  */
 export async function checkAsinExists(
-  asin: string,
-  userId: string
+  asin: string
 ): Promise<boolean> {
   if (!asin || asin.length < 10) {
     return false; // 유효하지 않은 ASIN은 false 반환
@@ -30,7 +28,6 @@ export async function checkAsinExists(
       .from('products')
       .select('id')
       .eq('asin', asin)
-      .eq('user_id', userId)
       .single();
 
     // 에러가 없고 데이터가 있으면 이미 존재
@@ -46,12 +43,10 @@ export async function checkAsinExists(
  * 여러 ASIN을 한 번에 확인 (배치 체크)
  * 
  * @param asins - 확인할 ASIN 배열
- * @param userId - 사용자 ID
  * @returns 존재하는 ASIN Set
  */
 export async function checkAsinsExist(
-  asins: string[],
-  userId: string
+  asins: string[]
 ): Promise<Set<string>> {
   if (asins.length === 0) {
     return new Set();
@@ -63,8 +58,7 @@ export async function checkAsinsExist(
     const { data, error } = await supabase
       .from('products')
       .select('asin')
-      .in('asin', asins)
-      .eq('user_id', userId);
+      .in('asin', asins);
 
     if (error) {
       console.error('ASIN 배치 체크 오류:', error);

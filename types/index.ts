@@ -46,6 +46,21 @@ export interface ScrapedProductRaw {
 
   /** 상품 설명 (HTML 또는 텍스트) */
   description?: string;
+
+  /** 상품 카테고리 (선택값, 없으면 저장 시 'General' 사용) */
+  category?: string;
+
+  /** 리뷰 개수 (선택값) */
+  reviewCount?: number;
+
+  /** 평점 (선택값, 0-5 범위) */
+  rating?: number;
+
+  /** 브랜드명 (선택값) */
+  brand?: string;
+
+  /** 상품 무게 (선택값, 킬로그램 단위) */
+  weight?: number;
 }
 
 /**
@@ -76,6 +91,21 @@ export interface Product {
 
   /** 상품 옵션 정보 (JSONB 형태로 저장) */
   variants: Record<string, any> | null;
+
+  /** 상품 카테고리 (필수값, NOT NULL) */
+  category: string;
+
+  /** 리뷰 개수 (선택값) */
+  reviewCount: number | null;
+
+  /** 평점 (선택값, 0-5 범위) */
+  rating: number | null;
+
+  /** 브랜드명 (선택값) */
+  brand: string | null;
+
+  /** 상품 무게 (선택값, 킬로그램 단위) */
+  weight: number | null;
 
   /** 소싱 타입 (US/CN) */
   sourcingType: SourcingType;

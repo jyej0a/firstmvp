@@ -100,20 +100,32 @@ export async function GET(request: NextRequest) {
 
     const { data: recentJobs, error: recentJobsError } = await supabase
       .from('scraping_jobs')
-      .select('status, success_count, failed_count, created_at')
+      .select('id, status, success_count, failed_count, created_at')
       .eq('user_id', userId)
       .gte('created_at', sevenDaysAgo.toISOString())
       .order('created_at', { ascending: false })
       .limit(10);
 
-    // 6. 최근 수집 작업 요약
-    const recentJobsSummary = recentJobs?.map((job: any) => ({
-      id: job.id,
-      status: job.status,
-      successCount: job.success_count || 0,
-      failedCount: job.failed_count || 0,
-      createdAt: job.created_at,
-    })) || [];
+    // 6. 최근 수집 작업 요약 (Job별 상품 개수 조회)
+    const recentJobsSummary = await Promise.all(
+      (recentJobs || []).map(async (job: any) => {
+        // Job에 속한 상품 개수 조회 (scraping_job_items에서 product_id가 있는 것만)
+        const { count: productCount } = await supabase
+          .from('scraping_job_items')
+          .select('*', { count: 'exact', head: true })
+          .eq('job_id', job.id)
+          .not('product_id', 'is', null);
+
+        return {
+          id: job.id || `job-${job.created_at}`, // fallback key 추가
+          status: job.status,
+          successCount: job.success_count || 0,
+          failedCount: job.failed_count || 0,
+          productCount: productCount || 0, // Job에 속한 상품 개수
+          createdAt: job.created_at,
+        };
+      })
+    );
 
     return NextResponse.json(
       {

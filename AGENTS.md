@@ -151,6 +151,38 @@ NEXT_PUBLIC_STORAGE_BUCKET=uploads
 
 ## Development Guidelines
 
+### 더미 테스트 워크플로우 (Dummy Test Workflow)
+
+**원칙**: 모든 새로운 기능이나 변경사항은 먼저 더미 테스트 환경에서 검증한 후 메인 코드에 적용합니다.
+
+**워크플로우**:
+
+1. **더미 테스트 환경에서 개발**
+   - 더미 테스트 API: `/api/scrape-v2/dummy`
+   - 실제 스크래핑 없이 로직만 테스트
+   - 빠른 피드백 루프 (5초 간격, 실제는 60초)
+   - 더미 데이터로 DB 저장 및 Shopify 연동 테스트
+
+2. **더미 테스트 검증**
+   - 순차 처리 로직 정상 동작 확인
+   - 에러 처리 및 재시도 로직 검증
+   - 진행 상황 업데이트 확인
+   - Job 상태 관리 확인
+
+3. **메인 코드 적용**
+   - 더미 테스트에서 검증된 로직을 메인 코드에 적용
+   - 메인 코드: `/api/scrape-v2` (실제 스크래핑)
+   - `lib/scraper/sequential-scraper.ts` (순차 처리 로직)
+
+**더미 테스트 파일 위치**:
+- `app/api/scrape-v2/dummy/route.ts`: 더미 테스트 API
+- 실제 스크래핑 로직은 더미에서 검증 후 `lib/scraper/sequential-scraper.ts`에 적용
+
+**주의사항**:
+- 더미 테스트는 실제 아마존 스크래핑을 하지 않으므로 차단 위험이 없음
+- 더미 테스트에서 검증 완료 후에만 메인 코드 수정
+- 메인 코드 수정 시에도 더미 테스트로 먼저 검증 권장
+
 ### Server Actions vs API Routes
 
 **우선순위**: Server Actions > API Routes

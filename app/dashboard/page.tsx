@@ -332,7 +332,7 @@ export default function DashboardPage() {
               <Menu className="h-6 w-6" />
             </Button>
             <div>
-              <h1 className="text-3xl font-bold mb-2">na-zak-zon V1</h1>
+              <h1 className="text-3xl font-bold mb-2">dashboard</h1>
         <p className="text-muted-foreground">
             
         </p>

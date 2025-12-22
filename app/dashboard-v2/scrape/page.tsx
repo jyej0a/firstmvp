@@ -10,11 +10,13 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import ScrapingProgress from '@/components/ScrapingProgress';
-import type { ApiResponse } from '@/types';
+import Image from 'next/image';
+import Link from 'next/link';
+import type { ApiResponse, Product } from '@/types';
 
 export default function ScrapePage() {
   const [searchInput, setSearchInput] = useState('');
@@ -23,6 +25,10 @@ export default function ScrapePage() {
   
   // 순차 처리 Job ID 상태
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
+
+  // 수집 중인 상품 목록 (draft 상태)
+  const [collectingProducts, setCollectingProducts] = useState<Product[]>([]);
+  const [isLoadingCollectingProducts, setIsLoadingCollectingProducts] = useState(false);
 
   // 더미 테스트 스크래핑 (테스트용)
   const handleDummyTest = async () => {
@@ -119,6 +125,86 @@ export default function ScrapePage() {
     console.log('✅ 순차 처리 작업 완료');
     setIsLoading(false);
   };
+
+
+  // Job이 시작되면 수집 중인 상품 목록 조회 시작
+  useEffect(() => {
+    if (!currentJobId) {
+      // Job이 없으면 목록 초기화
+      setCollectingProducts([]);
+      return;
+    }
+
+    // 즉시 한 번 조회
+    const fetchOnce = async () => {
+      setIsLoadingCollectingProducts(true);
+      try {
+        // 현재 Job에 속한 draft 상품만 조회
+        const response = await fetch(`/api/products?status=draft&jobId=${currentJobId}&limit=100`);
+        const data: ApiResponse<{
+          products: Product[];
+          total: number;
+          limit: number;
+          offset: number;
+        }> = await response.json();
+
+        if (response.ok && data.success && data.data) {
+          const draftProducts = data.data.products.filter(p => p.status === 'draft');
+          // 깜빡임 방지: 실제로 변경된 경우에만 업데이트
+          setCollectingProducts(prev => {
+            const prevIds = prev.map(p => p.id).sort().join(',');
+            const newIds = draftProducts.map(p => p.id).sort().join(',');
+            if (prevIds !== newIds) {
+              console.log(`📦 수집 중인 상품 업데이트: ${draftProducts.length}개`);
+              return draftProducts;
+            }
+            return prev;
+          });
+        }
+      } catch (err) {
+        console.error('❌ 수집 중인 상품 조회 실패:', err);
+      } finally {
+        setIsLoadingCollectingProducts(false);
+      }
+    };
+
+    fetchOnce();
+
+    // 5초마다 자동 새로고침 (uploaded 상태가 되면 자동으로 제거됨)
+    const interval = setInterval(async () => {
+      setIsLoadingCollectingProducts(true);
+      try {
+        // 현재 Job에 속한 draft 상품만 조회
+        const response = await fetch(`/api/products?status=draft&jobId=${currentJobId}&limit=100`);
+        const data: ApiResponse<{
+          products: Product[];
+          total: number;
+          limit: number;
+          offset: number;
+        }> = await response.json();
+
+        if (response.ok && data.success && data.data) {
+          const draftProducts = data.data.products.filter(p => p.status === 'draft');
+          // 깜빡임 방지: 실제로 변경된 경우에만 업데이트
+          setCollectingProducts(prev => {
+            const prevIds = prev.map(p => p.id).sort().join(',');
+            const newIds = draftProducts.map(p => p.id).sort().join(',');
+            if (prevIds !== newIds) {
+              console.log(`📦 수집 중인 상품 업데이트: ${draftProducts.length}개`);
+              return draftProducts;
+            }
+            return prev;
+          });
+        }
+      } catch (err) {
+        console.error('❌ 수집 중인 상품 조회 실패:', err);
+      } finally {
+        setIsLoadingCollectingProducts(false);
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [currentJobId]);
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-7xl">
@@ -241,6 +327,102 @@ export default function ScrapePage() {
           </label>
         </div>
       </div>
+
+      {/* 수집 중인 상품 목록 */}
+      {currentJobId && (
+        <div className="mb-6 p-6 bg-card rounded-none border">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-lg font-semibold mb-1">수집 중인 상품</h2>
+              <p className="text-sm text-muted-foreground">
+                등록이 완료되면 자동으로 ProductList로 이동합니다.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.open('/dashboard-v2/products', '_blank')}
+            >
+              📋 ProductList 바로가기
+            </Button>
+          </div>
+
+          {isLoadingCollectingProducts ? (
+            <div className="text-center py-8 text-muted-foreground">
+              수집 중인 상품을 불러오는 중...
+            </div>
+          ) : collectingProducts.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              아직 수집된 상품이 없습니다.
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-[400px] overflow-y-auto">
+              {collectingProducts.map((product) => (
+                <div
+                  key={product.id}
+                  className="flex items-center gap-4 p-3 border rounded-none hover:bg-muted/30 transition-colors"
+                >
+                  {/* 이미지 */}
+                  <div className="relative w-16 h-16 flex-shrink-0">
+                    {product.images[0] ? (
+                      <Image
+                        src={product.images[0]}
+                        alt={product.title}
+                        fill
+                        className="object-cover rounded-none"
+                        sizes="64px"
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-muted rounded-none flex items-center justify-center">
+                        <span className="text-xs text-muted-foreground">No Image</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 상품 정보 */}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium line-clamp-1" title={product.title}>
+                      {product.title}
+                    </p>
+                    <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
+                      <span>ASIN: {product.asin}</span>
+                      <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded-none">
+                        Draft
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* 가격 정보 */}
+                  <div className="text-right flex-shrink-0">
+                    <p className="text-sm font-semibold">
+                      ${product.sellingPrice.toLocaleString('en-US', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      마진: {product.marginRate}%
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ProductList 바로가기 버튼 (하단) */}
+          {collectingProducts.length > 0 && (
+            <div className="mt-4 pt-4 border-t">
+              <Button
+                variant="default"
+                className="w-full"
+                onClick={() => window.open('/dashboard-v2/products', '_blank')}
+              >
+                📋 ProductList에서 전체 상품 보기 (새 창)
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

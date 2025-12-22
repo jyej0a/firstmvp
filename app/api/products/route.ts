@@ -59,13 +59,40 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get("limit") || "50", 10);
     const offset = parseInt(searchParams.get("offset") || "0", 10);
     const status = searchParams.get("status"); // status 필터링 추가
+    const jobId = searchParams.get("jobId"); // jobId 필터링 추가 (현재 Job에 속한 상품만 조회)
 
-    console.log(`📊 조회 조건: limit=${limit}, offset=${offset}, status=${status || "all"}`);
+    console.log(`📊 조회 조건: limit=${limit}, offset=${offset}, status=${status || "all"}, jobId=${jobId || "all"}`);
 
     // 3. Supabase 클라이언트 생성
     const supabase = getServiceRoleClient();
 
-    // 4. 쿼리 빌더 생성
+    // 4. jobId 필터링: 현재 Job에 속한 product_id 목록 조회
+    let jobProductIds: string[] | null = null;
+    if (jobId) {
+      const { data: jobItems, error: jobItemsError } = await supabase
+        .from("scraping_job_items")
+        .select("product_id")
+        .eq("job_id", jobId)
+        .not("product_id", "is", null);
+
+      if (jobItemsError) {
+        console.error("❌ Job Items 조회 실패:", jobItemsError);
+        console.groupEnd();
+
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Job 상품 목록을 조회하는 중 오류가 발생했습니다.",
+          } satisfies ApiResponse,
+          { status: 500 }
+        );
+      }
+
+      jobProductIds = jobItems?.map((item) => item.product_id).filter((id): id is string => id !== null) || [];
+      console.log(`📋 Job에 속한 상품 ID 개수: ${jobProductIds.length}개`);
+    }
+
+    // 5. 쿼리 빌더 생성
     let countQuery = supabase
       .from("products")
       .select("*", { count: "exact", head: true })
@@ -76,13 +103,35 @@ export async function GET(request: NextRequest) {
       .select("*")
       .eq("user_id", userId);
 
-    // 5. status 필터링 적용
+    // 6. jobId 필터링 적용 (현재 Job에 속한 상품만 조회)
+    if (jobId && jobProductIds && jobProductIds.length > 0) {
+      countQuery = countQuery.in("id", jobProductIds);
+      dataQuery = dataQuery.in("id", jobProductIds);
+    } else if (jobId && (!jobProductIds || jobProductIds.length === 0)) {
+      // Job이 있지만 아직 상품이 없는 경우 빈 결과 반환
+      console.log("📋 Job에 속한 상품이 아직 없습니다.");
+      return NextResponse.json(
+        {
+          success: true,
+          data: {
+            products: [],
+            total: 0,
+            limit,
+            offset,
+          },
+          message: "아직 수집된 상품이 없습니다.",
+        } satisfies ApiResponse,
+        { status: 200 }
+      );
+    }
+
+    // 7. status 필터링 적용
     if (status) {
       countQuery = countQuery.eq("status", status);
       dataQuery = dataQuery.eq("status", status);
     }
 
-    // 6. 전체 개수 조회 (페이지네이션용)
+    // 8. 전체 개수 조회 (페이지네이션용)
     const { count, error: countError } = await countQuery;
 
     if (countError) {
@@ -101,7 +150,7 @@ export async function GET(request: NextRequest) {
     const total = count || 0;
     console.log(`📦 총 상품 개수: ${total}개`);
 
-    // 7. 상품 목록 조회
+    // 9. 상품 목록 조회
     const { data, error } = await dataQuery
       .order("created_at", { ascending: false })
       .range(offset, offset + limit - 1);
@@ -119,7 +168,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // 6. DB 데이터를 Product 타입으로 변환 (snake_case → camelCase)
+    // 10. DB 데이터를 Product 타입으로 변환 (snake_case → camelCase)
     const products: Product[] = (data || []).map((row: any) => ({
       id: row.id,
       userId: row.user_id,
@@ -145,7 +194,7 @@ export async function GET(request: NextRequest) {
     console.log(`✅ ${products.length}개 상품 조회 완료`);
     console.groupEnd();
 
-    // 7. 성공 응답
+    // 11. 성공 응답
     return NextResponse.json(
       {
         success: true,

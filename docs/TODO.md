@@ -600,7 +600,7 @@ US 타입 기준 마진율로 판매가 자동 계산 (MVP 1.0 범위)
 - [ ] UI 통합 (ProductList 컴포넌트)
 - [ ] API 업데이트 (상품 업데이트 시 CN 타입 처리)
 
-### 2.27 타오바오 이미지 검색 브릿지 재구현 (01/02 - 01/03, 2일) 🔄 진행 중
+### 2.27 원가 페이지 이미지 검색 브릿지 재구현 (01/02 - 01/03, 2일) 🔄 진행 중
 
 - [ ] 외부 이미지 URL 문제 해결 방안 모색
   - [ ] Google Lens API 조사
@@ -612,45 +612,85 @@ US 타입 기준 마진율로 판매가 자동 계산 (MVP 1.0 범위)
 
 ### 2.28 스크래핑 요소 추가 (01/03 - 01/04, 2일) 🔄 진행 중
 
-- [ ] **2-11-1. 현재 스크래핑 요소 항목 점검**
-  - [ ] amazon-scraper.ts 코드 분석하여 현재 수집되는 항목과 미수집 항목 정리
-  - [ ] ASIN, 제목, 이미지, 가격, URL 확인
-  - [ ] 카테고리, description, 리뷰수, 평점 미수집 확인
-- [ ] **2-11-2. DB 스키마 확장 - 카테고리 컬럼 추가**
-  - [ ] products 테이블에 category TEXT 컬럼 추가하는 마이그레이션 작성
-  - [ ] nullable로 추가
-- [ ] **2-11-3. DB 스키마 확장 - 리뷰수 평점 컬럼 추가**
-  - [ ] products 테이블에 review_count INTEGER, rating DECIMAL 컬럼 추가하는 마이그레이션 작성
-  - [ ] nullable로 추가, rating은 0-5 범위
-- [ ] **2-11-4. 타입 정의 업데이트**
-  - [ ] ScrapedProductRaw와 Product 인터페이스에 category, reviewCount, rating 필드 추가
-  - [ ] types/index.ts 파일 수정
+> 📌 **Shopify 반영 여부:**
+>
+> - ✅ **Shopify 등록 시 반영 필요:** 카테고리, description, variants, 브랜드명, 무게
+> - ❌ **Shopify 등록 시 불필요 (DB/UI만):** 리뷰수, 평점
+
+- [x] **2-11-1. 현재 스크래핑 요소 항목 점검** ✅ **완료**
+  - [x] amazon-scraper.ts 코드 분석하여 현재 수집되는 항목과 미수집 항목 정리
+  - [x] ASIN, 제목, 이미지, 가격, URL 확인
+  - [x] 카테고리, description, 리뷰수, 평점 미수집 확인
+  - [x] 점검 보고서 작성 (`docs/scraping-elements-audit.md`)
+- [x] **2-11-2. DB 스키마 확장 - 카테고리 컬럼 추가** ✅ **완료 (2025-01-03)**
+  - [x] products 테이블에 category TEXT 컬럼 추가하는 마이그레이션 작성
+  - [x] NOT NULL로 추가 (기본값 'General', 스크래핑 시 필수 수집)
+  - [x] **Shopify 반영:** ✅ Shopify 등록 시 product_type으로 사용
+- [x] **2-11-3. DB 스키마 확장 - 리뷰수 평점 컬럼 추가** ✅ **완료 (2025-01-03)**
+  - [x] products 테이블에 review_count INTEGER, rating DECIMAL 컬럼 추가하는 마이그레이션 작성
+  - [x] nullable로 추가, rating은 0-5 범위
+  - [x] **Shopify 반영:** ❌ Shopify 등록 시 불필요 (DB/UI 표시용만)
+- [x] **2-11-3.5. DB 스키마 확장 - 브랜드명 무게 컬럼 추가** ✅ **완료 (2025-01-03)**
+  - [x] products 테이블에 brand TEXT, weight DECIMAL 컬럼 추가하는 마이그레이션 작성
+  - [x] nullable로 추가, weight는 킬로그램 단위 (소수점 3자리)
+  - [x] **Shopify 반영:** ✅ Shopify 등록 시 vendor(브랜드), variants[].weight(무게)로 사용
+- [x] **2-11-4. 타입 정의 업데이트** ✅ **완료 (2025-01-03)**
+  - [x] ScrapedProductRaw 인터페이스에 category, reviewCount, rating, brand, weight 필드 추가
+  - [x] Product 인터페이스에 category, review_count, rating, brand, weight 필드 추가
+  - [x] types/index.ts 파일 수정
 - [ ] **2-11-5. 카테고리 수집 로직 추가**
   - [ ] 아마존 상세 페이지에서 카테고리 정보 추출하는 로직 구현
-  - [ ] 상세 페이지 접속 후 카테고리 경로 추출
+  - [ ] 상세 페이지 접속 후 카테고리 경로 추출 (`#wayfinding-breadcrumbs_feature_div`)
+  - [ ] **Shopify 반영:** ✅ Shopify 등록 시 product_type으로 전달
 - [ ] **2-11-6. 상세페이지 description 수집 로직 추가**
   - [ ] 아마존 상세 페이지에서 상품 설명 추출하는 함수 구현
-  - [ ] productDescription 섹션에서 HTML 또는 텍스트 추출
-- [ ] **2-11-7. 리뷰수 수집 로직 추가**
+  - [ ] productDescription 섹션에서 HTML 또는 텍스트 추출 (`#productDescription`, `#feature-bullets`)
+  - [ ] **Shopify 반영:** ✅ Shopify 등록 시 body_html로 전달
+- [ ] **2-11-7. 옵션 정보 (variants) 수집 로직 추가**
+  - [ ] 아마존 상세 페이지에서 옵션 정보 추출하는 로직 구현
+  - [ ] 색상, 크기 등 옵션 추출 (`#variation_color_name`, `#variation_size_name` 등)
+  - [ ] **Shopify 반영:** ✅ Shopify 등록 시 variants로 전달
+- [ ] **2-11-8. 리뷰수 수집 로직 추가**
   - [ ] 아마존 상세 페이지에서 리뷰 개수 추출하는 로직 구현
-  - [ ] 검색 결과 페이지 또는 상세 페이지에서 추출
-- [ ] **2-11-8. 평점 수집 로직 추가**
+  - [ ] 검색 결과 페이지 또는 상세 페이지에서 추출 (`#acrCustomerReviewText`)
+  - [ ] **Shopify 반영:** ❌ Shopify 등록 시 불필요 (DB/UI 표시용만)
+- [ ] **2-11-9. 평점 수집 로직 추가**
   - [ ] 아마존 상세 페이지에서 평점 추출하는 로직 구현
-  - [ ] 별점 정보 추출 (예: 4.5 out of 5)
-- [ ] **2-11-9. 이미지 수집 개선**
+  - [ ] 별점 정보 추출 (예: 4.5 out of 5) (`#acrPopover`, `.a-icon-alt`)
+  - [ ] **Shopify 반영:** ❌ Shopify 등록 시 불필요 (DB/UI 표시용만)
+- [ ] **2-11-9.5. 브랜드명 수집 로직 추가**
+  - [ ] 아마존 상세 페이지에서 브랜드명 추출하는 로직 구현
+  - [ ] 브랜드 정보 추출 (`#bylineInfo`, `.po-brand`, `#brand` 등)
+  - [ ] 검색 결과 페이지에서도 추출 시도 (가능한 경우)
+  - [ ] **Shopify 반영:** ✅ Shopify 등록 시 vendor 필드로 전달
+- [ ] **2-11-9.6. 무게 수집 로직 추가**
+  - [ ] 아마존 상세 페이지에서 무게 정보 추출하는 로직 구현
+  - [ ] "Item Weight" 또는 "Product Dimensions" 섹션에서 무게 추출
+  - [ ] 단위 변환 (파운드 → 킬로그램, 온스 → 킬로그램)
+  - [ ] **Shopify 반영:** ✅ Shopify 등록 시 variants[].weight, variants[].weight_unit로 전달
+- [ ] **2-11-10. 이미지 수집 개선**
   - [ ] 이미지 수집 로직 개선하여 중복 제거 및 고해상도 이미지 우선 수집
   - [ ] 상세 페이지 이미지 갤러리에서 고품질 이미지 우선 추출
-- [ ] **2-11-10. 스크래퍼 로직 통합**
+- [ ] **2-11-11. 스크래퍼 로직 통합**
   - [ ] scrapeSingleProduct 함수에 새로 추가한 수집 로직 통합
-  - [ ] 카테고리, description, 리뷰수, 평점을 상세 페이지에서 한 번에 수집
-- [ ] **2-11-11. DB 저장 로직 업데이트**
+  - [ ] 카테고리, description, variants, 리뷰수, 평점, 브랜드명, 무게를 상세 페이지에서 한 번에 수집
+- [ ] **2-11-12. DB 저장 로직 업데이트**
   - [ ] save-products.ts에서 새로 추가한 필드들을 DB에 저장하도록 수정
-  - [ ] category, review_count, rating 필드 포함하여 저장
-- [ ] **2-11-12. UI 표시 - ProductList 컴포넌트**
+  - [ ] category, description, variants, review_count, rating, brand, weight 필드 포함하여 저장
+- [ ] **2-11-13. Shopify 등록 로직 업데이트**
+  - [ ] lib/shopify/client.ts에서 카테고리, description, variants, 브랜드명, 무게를 Shopify API에 전달하도록 수정
+  - [ ] 카테고리 → product_type 매핑
+  - [ ] description → body_html 전달
+  - [ ] variants → variants 배열로 전달
+  - [ ] 브랜드명 → vendor 필드로 전달 (기존 "Trend-Hybrid" 고정값 대체)
+  - [ ] 무게 → variants[].weight, variants[].weight_unit로 전달 (킬로그램 단위)
+  - [ ] 리뷰수, 평점은 Shopify 등록 시 제외 (DB에만 저장)
+- [ ] **2-11-14. UI 표시 - ProductList 컴포넌트**
   - [ ] ProductList 컴포넌트에 카테고리, 리뷰수, 평점 표시 추가
   - [ ] 테이블 또는 카드 형태로 표시
-- [ ] **2-11-13. 통합 테스트**
+- [ ] **2-11-15. 통합 테스트**
   - [ ] 전체 스크래핑 플로우 테스트하여 모든 필드가 정상적으로 수집되는지 확인
+  - [ ] Shopify 등록 시 카테고리, description, variants, 브랜드명, 무게가 정상적으로 전달되는지 확인
   - [ ] 실제 아마존 상품으로 테스트
 
 ### 2.29 수집 중지 및 재개 기능 구현 (01/04 - 01/05, 2일) 🔄 진행 중

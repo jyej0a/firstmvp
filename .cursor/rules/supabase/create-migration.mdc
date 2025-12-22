@@ -32,6 +32,27 @@ For example:
 20240906123045_create_profiles.sql
 ```
 
+## Migration File Organization
+
+**Important: Group related changes into a single migration file**
+
+- **Same table modifications**: When adding multiple columns to the same table, combine them into ONE migration file
+  - ✅ Good: `20250103000000_add_product_fields.sql` (category, review_count, rating, brand, weight all in one file)
+  - ❌ Bad: Separate files for each column (creates unnecessary file clutter)
+- **Related changes**: Group logically related changes together (e.g., all product-related fields, all user-related fields)
+- **Exception**: Only create separate files if changes are completely unrelated or affect different tables with no logical connection
+
+**Example:**
+```sql
+-- ✅ Good: All product fields in one migration
+ALTER TABLE products
+  ADD COLUMN category TEXT NOT NULL DEFAULT 'General',
+  ADD COLUMN review_count INTEGER,
+  ADD COLUMN rating DECIMAL(3, 2),
+  ADD COLUMN brand TEXT,
+  ADD COLUMN weight DECIMAL(10, 3);
+```
+
 ## SQL Guidelines
 
 Write Postgres-compatible SQL code for Supabase migration files that:
