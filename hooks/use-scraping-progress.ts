@@ -38,11 +38,13 @@ export interface UseScrapingProgressResult {
  *
  * @param jobId - Job ID (null이면 조회하지 않음)
  * @param pollingInterval - Polling 간격 (밀리초, 기본값: 5000 = 5초)
+ * @param apiPath - API 경로 (기본값: '/api/scrape', v2는 '/api/scrape-v2')
  * @returns 진행 상황 정보 및 상태
  */
 export function useScrapingProgress(
   jobId: string | null,
-  pollingInterval: number = 5000
+  pollingInterval: number = 5000,
+  apiPath: string = '/api/scrape'
 ): UseScrapingProgressResult {
   const [progress, setProgress] = useState<JobProgress | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -61,7 +63,7 @@ export function useScrapingProgress(
     setError(null);
 
     try {
-      const response = await fetch(`/api/scrape/${jobId}`);
+      const response = await fetch(`${apiPath}/${jobId}`);
       const data = await response.json();
 
       if (!response.ok || !data.success) {
@@ -107,7 +109,7 @@ export function useScrapingProgress(
         intervalRef.current = null;
       }
     };
-  }, [jobId, pollingInterval]);
+  }, [jobId, pollingInterval, apiPath]);
 
   // Job이 완료되면 Polling 중지
   useEffect(() => {

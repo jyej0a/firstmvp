@@ -10,6 +10,20 @@ const Navbar = () => {
        V1
       </Link>
       <div className="flex gap-4 items-center">
+        <SignedIn>
+          <div className="flex gap-2 items-center">
+            <Link href="/dashboard">
+              <Button variant="outline" size="sm">
+                V1
+              </Button>
+            </Link>
+            <Link href="/dashboard-v2">
+              <Button variant="default" size="sm">
+                V2
+              </Button>
+            </Link>
+          </div>
+        </SignedIn>
         <SignedOut>
           <SignInButton mode="modal">
             <Button>로그인</Button>

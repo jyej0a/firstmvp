@@ -1,14 +1,10 @@
 /**
  * @file app/dashboard/page.tsx
- * @description Trend-Hybrid Admin 메인 대시보드
+ * @description Trend-Hybrid Admin 대시보드 V1 (일괄 수집)
  * 
- * Phase 2.13: 대시보드 통합
- * - 키워드/URL 입력창
- * - 수집 시작 버튼 (API 호출)
- * - 상품 목록 조회 및 표시 (ProductList)
- * - 체크박스 선택 및 "선택 등록" 버튼
- * - 로딩 상태 표시
- * - 결과/에러 메시지 표시
+ * V1: 일괄 수집 모드
+ * - 30개 상품을 한번에 수집
+ * - 수동으로 선택하여 Shopify 등록
  */
 
 'use client';
@@ -17,7 +13,7 @@ import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import ProductList from '@/components/ProductList';
-import ScrapingProgress from '@/components/ScrapingProgress';
+import { Menu, X } from 'lucide-react';
 import type { ApiResponse, ScrapedProductRaw, Product, ShopifyUploadResult } from '@/types';
 
 interface ScrapeResult {
@@ -39,8 +35,8 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ScrapeResult | null>(null);
   
-  // 순차 처리 Job ID 상태
-  const [currentJobId, setCurrentJobId] = useState<string | null>(null);
+  // 사이드바 열림/닫힘 상태
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Phase 2.13: 상품 목록 상태
   const [products, setProducts] = useState<Product[]>([]);
@@ -59,7 +55,7 @@ export default function DashboardPage() {
 
   // 상품 목록 조회 함수
   const fetchProducts = async () => {
-    console.group('📋 [Dashboard] 상품 목록 조회');
+    console.group('📋 [Dashboard V1] 상품 목록 조회');
     setIsLoadingProducts(true);
 
     try {
@@ -89,7 +85,7 @@ export default function DashboardPage() {
 
   // Phase 2.16: 마진율 변경 핸들러
   const handleMarginChange = async (productId: string, newMargin: number) => {
-    console.group('💰 [Dashboard] 마진율 업데이트');
+    console.group('💰 [Dashboard V1] 마진율 업데이트');
     console.log(`상품 ID: ${productId}`);
     console.log(`새 마진율: ${newMargin}%`);
 
@@ -128,7 +124,7 @@ export default function DashboardPage() {
 
   // Phase 2.21: Shopify 일괄 등록 핸들러
   const handleBulkUpload = async () => {
-    console.group('🛒 [Dashboard] Shopify 일괄 등록');
+    console.group('🛒 [Dashboard V1] Shopify 일괄 등록');
     console.log(`선택된 상품 개수: ${selectedIds.length}개`);
 
     // 상태 초기화
@@ -196,16 +192,15 @@ export default function DashboardPage() {
     }
   };
 
-  // 순차 처리 스크래핑 시작
+  // 일괄 수집 스크래핑 시작
   const handleScrape = async () => {
-    console.group('🔍 [Dashboard] 순차 처리 수집 시작');
+    console.group('🔍 [Dashboard V1] 일괄 수집 시작');
     console.log('입력값:', searchInput);
 
     // 상태 초기화
     setIsLoading(true);
     setError(null);
     setResult(null);
-    setCurrentJobId(null);
 
     try {
       console.log('📡 API 요청 전송 중...');
@@ -214,59 +209,135 @@ export default function DashboardPage() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ 
-          searchInput,
-          totalTarget: 1000, // 하루 최대 1000개
-        }),
+        body: JSON.stringify({ searchInput }),
       });
 
-      const data: ApiResponse<{ jobId: string; message: string }> = await response.json();
+      const data: ApiResponse<ScrapeResult> = await response.json();
       console.log('📦 API 응답:', data);
 
       if (!response.ok || !data.success || !data.data) {
-        throw new Error(data.error || '스크래핑 작업 시작에 실패했습니다.');
+        throw new Error(data.error || '스크래핑에 실패했습니다.');
       }
 
-      // Job ID 저장
-      setCurrentJobId(data.data.jobId);
-      console.log('✅ 순차 처리 작업 시작됨!');
-      console.log(`   - Job ID: ${data.data.jobId}`);
-      console.log(`   - 메시지: ${data.data.message}`);
+      setResult(data.data);
+      console.log('✅ 일괄 수집 완료!');
+      console.log(`   - 수집된 상품: ${data.data.products.length}개`);
+      console.log(`   - 저장된 상품: ${data.data.stats.saved || 0}개`);
+      console.log(`   - 소요 시간: ${(data.data.stats.duration / 1000).toFixed(2)}초`);
 
-      // 상품 목록 주기적 새로고침 (진행 중)
-      const refreshInterval = setInterval(() => {
-        fetchProducts();
-      }, 10000); // 10초마다 새로고침
-
-      // 완료 시 인터벌 정리 (나중에 ScrapingProgress에서 처리)
+      // 상품 목록 새로고침
+      await fetchProducts();
 
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다.';
-      console.error('❌ 스크래핑 작업 시작 실패:', errorMessage);
+      console.error('❌ 스크래핑 실패:', errorMessage);
       setError(errorMessage);
-      setIsLoading(false);
     } finally {
+      setIsLoading(false);
       console.groupEnd();
     }
   };
 
-  // 작업 완료 시 콜백
-  const handleJobComplete = () => {
-    console.log('✅ 순차 처리 작업 완료');
-    setIsLoading(false);
-    // 상품 목록 최종 새로고침
-    fetchProducts();
-  };
-
   return (
-    <div className="container mx-auto px-4 py-8 max-w-7xl bg-terminal min-h-screen">
-      {/* 헤더 */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">na-zak-zon</h1>
-        <p className="text-muted-foreground">
+    <div className="flex min-h-screen bg-terminal">
+      {/* 왼쪽 사이드바 */}
+      <aside
+        className={`fixed left-0 top-0 h-full w-64 bg-card border-r border-border z-50 transition-transform duration-300 ${
+          isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        } lg:translate-x-0`}
+      >
+        {/* 사이드바 헤더 */}
+        <div className="flex items-center justify-between p-4 border-b border-border">
+          <h2 className="text-2xl font-bold">Nav</h2>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="lg:hidden"
+            onClick={() => setIsSidebarOpen(false)}
+          >
+            <X className="h-5 w-5" />
+          </Button>
+        </div>
+
+        {/* 메뉴 항목 */}
+        <nav className="p-4">
+          <ul className="space-y-2">
+            <li>
+              <button
+                className="w-full text-left px-4 py-3 rounded-none hover:bg-accent transition-colors text-sm font-medium"
+                onClick={() => {
+                  // 실제 동작은 필요 없음
+                  console.log('Dashboard 클릭');
+                }}
+              >
+                Dashboard
+              </button>
+            </li>
+            <li>
+              <button
+                className="w-full text-left px-4 py-3 rounded-none hover:bg-accent transition-colors text-sm font-medium"
+                onClick={() => {
+                  // 실제 동작은 필요 없음
+                  console.log('Margin Rate 클릭');
+                }}
+              >
+                Margin Rate
+              </button>
+            </li>
+            <li>
+              <button
+                className="w-full text-left px-4 py-3 rounded-none hover:bg-accent transition-colors text-sm font-medium"
+                onClick={() => {
+                  // 실제 동작은 필요 없음
+                  console.log('Editor 클릭');
+                }}
+              >
+                Editor
+              </button>
+            </li>
+            <li>
+              <button
+                className="w-full text-left px-4 py-3 rounded-none hover:bg-accent transition-colors text-sm font-medium"
+                onClick={() => {
+                  // 실제 동작은 필요 없음
+                  console.log('History 클릭');
+                }}
+              >
+                History
+              </button>
+            </li>
+          </ul>
+        </nav>
+      </aside>
+
+      {/* 오버레이 (모바일용) */}
+      {isSidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
+      {/* 메인 컨텐츠 */}
+      <div className="flex-1 lg:ml-64">
+        <div className="container mx-auto px-4 py-8 max-w-7xl">
+          {/* 헤더 - 햄버거 메뉴 버튼 포함 */}
+          <div className="mb-8 flex items-center gap-4">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="lg:hidden"
+              onClick={() => setIsSidebarOpen(true)}
+            >
+              <Menu className="h-6 w-6" />
+            </Button>
+            <div>
+              <h1 className="text-3xl font-bold mb-2">na-zak-zon V1</h1>
+              <p className="text-muted-foreground">
             
-        </p>
-      </div>
+              </p>
+            </div>
+          </div>
 
       {/* 🚀 Quick Links (트렌드 숏컷) */}
       <div className="mb-6 p-4 bg-card rounded-none border">
@@ -302,6 +373,17 @@ export default function DashboardPage() {
           >
             💡 TikTok Trends
           </Button>
+          <Button
+            variant="default"
+            size="sm"
+            onClick={() => {
+              // AI 임시 추천 기능
+              console.log('🤖 AI 추천 기능 실행 (임시)');
+              alert('AI가 추천 상품을 추출 중입니다... (임시 기능)');
+            }}
+          >
+            Recommend
+          </Button>
         </div>
       </div>
 
@@ -329,14 +411,15 @@ export default function DashboardPage() {
           </Button>
         </div>
 
-        {/* 순차 처리 진행 상황 표시 */}
-        {currentJobId && (
-          <div className="mb-4">
-            <ScrapingProgress
-              jobId={currentJobId}
-              pollingInterval={5000}
-              onComplete={handleJobComplete}
-            />
+        {/* 결과 메시지 표시 */}
+        {result && (
+          <div className="mb-4 p-3 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-none">
+            <p className="text-sm text-green-700 dark:text-green-300">
+              ✅ {result.products.length}개 상품 수집 완료! ({result.stats.saved || 0}개 저장됨)
+            </p>
+            <p className="text-xs text-green-600 dark:text-green-400 mt-1">
+              ⏱️ 소요 시간: {(result.stats.duration / 1000).toFixed(2)}초
+            </p>
           </div>
         )}
 
@@ -366,7 +449,7 @@ export default function DashboardPage() {
               className="w-4 h-4"
               disabled
             />
-            <span>하루 최대 1000개 수집 (1분당 1개)</span>
+            <span>최대 30개 상품 수집</span>
           </label>
         </div>
       </div>
@@ -436,7 +519,8 @@ export default function DashboardPage() {
         onMarginChange={handleMarginChange}
         isLoading={isLoadingProducts}
       />
+        </div>
+      </div>
     </div>
   );
 }
-

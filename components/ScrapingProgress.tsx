@@ -28,6 +28,9 @@ export interface ScrapingProgressProps {
   /** Polling 간격 (밀리초, 기본값: 5000) */
   pollingInterval?: number;
 
+  /** API 경로 (기본값: '/api/scrape', v2는 '/api/scrape-v2') */
+  apiPath?: string;
+
   /** 완료 시 콜백 함수 */
   onComplete?: () => void;
 }
@@ -59,9 +62,10 @@ function formatTime(seconds: number): string {
 export default function ScrapingProgress({
   jobId,
   pollingInterval = 5000,
+  apiPath = '/api/scrape',
   onComplete,
 }: ScrapingProgressProps) {
-  const { progress, isLoading, error } = useScrapingProgress(jobId, pollingInterval);
+  const { progress, isLoading, error } = useScrapingProgress(jobId, pollingInterval, apiPath);
   const [isCancelling, setIsCancelling] = useState(false);
 
   // 완료 시 콜백 호출 (useEffect로 한 번만 호출되도록 처리)
@@ -80,7 +84,7 @@ export default function ScrapingProgress({
     setIsCancelling(true);
 
     try {
-      const response = await fetch(`/api/scrape/${jobId}`, {
+      const response = await fetch(`${apiPath}/${jobId}`, {
         method: "DELETE",
       });
 
