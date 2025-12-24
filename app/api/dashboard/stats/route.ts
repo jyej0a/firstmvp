@@ -1,8 +1,15 @@
 /**
  * @file app/api/dashboard/stats/route.ts
- * @description Dashboard 통계 API
+ * @description Dashboard 통계 API (V2 전용)
  * 
  * 수집 현황 및 상품 통계를 제공합니다.
+ * 
+ * **V2 전용 API**: 이 API는 V2 시스템 전용입니다.
+ * - `products_v2` 테이블 조회
+ * - `scraping_jobs`, `scraping_job_items` 테이블 사용
+ * - V1 통계는 지원하지 않음
+ * 
+ * Endpoint: GET /api/dashboard/stats
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -26,9 +33,9 @@ export async function GET(request: NextRequest) {
 
     const supabase = getServiceRoleClient();
 
-    // 2. 전체 상품 통계
+    // 2. 전체 상품 통계 (V2: products_v2 테이블 사용)
     const { count: totalProducts, error: productsError } = await supabase
-      .from('products')
+      .from('products_v2') // V2는 products_v2 테이블 사용
       .select('*', { count: 'exact', head: true })
       .eq('user_id', userId);
 
@@ -36,9 +43,9 @@ export async function GET(request: NextRequest) {
       console.error('상품 통계 조회 실패:', productsError);
     }
 
-    // 3. 상태별 상품 통계
+    // 3. 상태별 상품 통계 (V2: products_v2 테이블 사용)
     const { data: statusStats, error: statusError } = await supabase
-      .from('products')
+      .from('products_v2') // V2는 products_v2 테이블 사용
       .select('status')
       .eq('user_id', userId);
 
@@ -61,7 +68,7 @@ export async function GET(request: NextRequest) {
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
     const { data: recentProducts, error: recentError } = await supabase
-      .from('products')
+      .from('products_v2') // V2는 products_v2 테이블 사용
       .select('created_at')
       .eq('user_id', userId)
       .gte('created_at', thirtyDaysAgo.toISOString())

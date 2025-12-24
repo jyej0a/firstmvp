@@ -9,6 +9,7 @@
  * Query Parameters:
  * - limit: number (optional, default: 50) - 조회할 상품 개수
  * - offset: number (optional, default: 0) - 페이지네이션 오프셋
+ * - version: string (optional, default: 'v2') - 'v1' 또는 'v2' (조회할 테이블 선택)
  *
  * Response:
  * {
@@ -60,15 +61,36 @@ export async function GET(request: NextRequest) {
     const offset = parseInt(searchParams.get("offset") || "0", 10);
     const status = searchParams.get("status"); // status 필터링 추가
     const jobId = searchParams.get("jobId"); // jobId 필터링 추가 (현재 Job에 속한 상품만 조회)
+    const version = searchParams.get("version") || "v2"; // V1/V2 구분 (기본값: v2)
 
-    console.log(`📊 조회 조건: limit=${limit}, offset=${offset}, status=${status || "all"}, jobId=${jobId || "all"}`);
+    // version 검증
+    if (version !== "v1" && version !== "v2") {
+      console.error("❌ 유효하지 않은 version 파라미터");
+      console.groupEnd();
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: "version 파라미터는 'v1' 또는 'v2'여야 합니다.",
+        } satisfies ApiResponse,
+        { status: 400 }
+      );
+    }
+
+    // V1에서는 jobId 필터링 불가 (V2 전용 기능)
+    if (version === "v1" && jobId) {
+      console.warn("⚠️  V1에서는 jobId 필터링을 지원하지 않습니다.");
+    }
+
+    const tableName = version === "v1" ? "products_v1" : "products_v2";
+    console.log(`📊 조회 조건: version=${version}, table=${tableName}, limit=${limit}, offset=${offset}, status=${status || "all"}, jobId=${jobId || "all"}`);
 
     // 3. Supabase 클라이언트 생성
     const supabase = getServiceRoleClient();
 
-    // 4. jobId 필터링: 현재 Job에 속한 product_id 목록 조회
+    // 4. jobId 필터링: 현재 Job에 속한 product_id 목록 조회 (V2 전용)
     let jobProductIds: string[] | null = null;
-    if (jobId) {
+    if (version === "v2" && jobId) {
       const { data: jobItems, error: jobItemsError } = await supabase
         .from("scraping_job_items")
         .select("product_id")
@@ -92,22 +114,23 @@ export async function GET(request: NextRequest) {
       console.log(`📋 Job에 속한 상품 ID 개수: ${jobProductIds.length}개`);
     }
 
-    // 5. 쿼리 빌더 생성
+    // 5. 쿼리 빌더 생성 (version에 따라 테이블 선택)
     let countQuery = supabase
-      .from("products")
+      .from(tableName)
       .select("*", { count: "exact", head: true })
       .eq("user_id", userId);
 
     let dataQuery = supabase
-      .from("products")
+      .from(tableName)
       .select("*")
       .eq("user_id", userId);
 
-    // 6. jobId 필터링 적용 (현재 Job에 속한 상품만 조회)
-    if (jobId && jobProductIds && jobProductIds.length > 0) {
+    // 6. jobId 필터링 적용 (V2 전용, 현재 Job에 속한 상품만 조회)
+    if (version === "v2" && jobId) {
+      if (jobProductIds && jobProductIds.length > 0) {
       countQuery = countQuery.in("id", jobProductIds);
       dataQuery = dataQuery.in("id", jobProductIds);
-    } else if (jobId && (!jobProductIds || jobProductIds.length === 0)) {
+      } else {
       // Job이 있지만 아직 상품이 없는 경우 빈 결과 반환
       console.log("📋 Job에 속한 상품이 아직 없습니다.");
       return NextResponse.json(
@@ -123,6 +146,7 @@ export async function GET(request: NextRequest) {
         } satisfies ApiResponse,
         { status: 200 }
       );
+      }
     }
 
     // 7. status 필터링 적용

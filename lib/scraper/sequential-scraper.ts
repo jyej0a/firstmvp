@@ -617,7 +617,7 @@ async function processSequentialScraping(
 
           while (saveRetryCount <= maxSaveRetries) {
             try {
-              const saveResult = await saveProductsToDatabase([filteredProduct], userId);
+              const saveResult = await saveProductsToDatabase([filteredProduct], userId, 'products_v2'); // V2는 products_v2 테이블 사용
 
               if (saveResult.saved === 0 || saveResult.failed > 0) {
                 throw new Error(
@@ -655,7 +655,7 @@ async function processSequentialScraping(
 
           // 저장된 상품 ID 조회 (ASIN만으로 조회, ASIN이 unique이므로)
           const { data: savedProduct } = await supabase
-            .from("products")
+            .from("products_v2") // V2는 products_v2 테이블 사용
             .select("id")
             .eq("asin", filteredProduct.asin)
             .single();
@@ -727,7 +727,7 @@ async function processSequentialScraping(
 
           // 저장된 상품 정보 조회
           const { data: productRow, error: productError } = await supabase
-            .from("products")
+            .from("products_v2") // V2는 products_v2 테이블 사용
             .select("*")
             .eq("id", savedProductId)
             .single();
@@ -798,9 +798,9 @@ async function processSequentialScraping(
               .eq("id", jobItemId);
           }
 
-          // products 테이블의 status를 'uploaded'로 업데이트
+          // products_v2 테이블의 status를 'uploaded'로 업데이트
           await supabase
-            .from("products")
+            .from("products_v2") // V2는 products_v2 테이블 사용
             .update({ status: "uploaded" })
             .eq("id", savedProductId);
 

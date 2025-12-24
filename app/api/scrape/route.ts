@@ -130,11 +130,12 @@ export async function POST(request: NextRequest) {
     const filterResult = await filterByBannedKeywords(scrapeResult.products);
     console.log(`✅ 필터링 완료: ${filterResult.stats.filteredOut}개 제외, ${filterResult.stats.passed}개 통과`);
 
-    // 8. DB 저장
+    // 8. DB 저장 (V1: products_v1 테이블 사용)
     console.log("💾 DB 저장 시작...");
     const saveResult = await saveProductsToDatabase(
       filterResult.filteredProducts,
-      userId
+      userId,
+      'products_v1' // V1은 products_v1 테이블 사용
     );
     console.log(`✅ 저장 완료: ${saveResult.saved}개 저장, ${saveResult.failed}개 실패`);
 

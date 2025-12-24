@@ -167,7 +167,7 @@ async function processDummyScraping(
         /*
         try {
           const savedProduct = await supabase
-            .from("products")
+            .from("products_v2") // V2는 products_v2 테이블 사용
             .select("*")
             .eq("asin", dummyProduct.asin)
             .single();

@@ -61,15 +61,20 @@ function calculateSellingPrice(
  *
  * @param products - 저장할 상품 배열 (필터링된 상품)
  * @param userId - 사용자 ID (선택사항, 제공되지 않으면 auth() 사용)
+ * @param tableName - 테이블명 (기본값: 'products_v1', V2는 'products_v2' 사용)
  * @returns 저장 결과 (성공/실패 통계)
  *
  * @example
- * const result = await saveProductsToDatabase(filteredProducts);
- * console.log(`${result.saved}개 저장 완료, ${result.failed}개 실패`);
+ * // V1 사용
+ * const result = await saveProductsToDatabase(filteredProducts, userId, 'products_v1');
+ * 
+ * // V2 사용
+ * const result = await saveProductsToDatabase(filteredProducts, userId, 'products_v2');
  */
 export async function saveProductsToDatabase(
   products: ScrapedProductRaw[],
-  userId?: string
+  userId?: string,
+  tableName: 'products_v1' | 'products_v2' = 'products_v1'
 ): Promise<SaveResult> {
   console.group("💾 DB 저장 시작");
   const startTime = Date.now();
@@ -126,7 +131,7 @@ export async function saveProductsToDatabase(
         : null;
 
       // DB에 저장 (UPSERT) - ASIN만 unique 제약 사용
-      const { error } = await supabase.from("products").upsert(
+      const { error } = await supabase.from(tableName).upsert(
         {
           user_id: finalUserId,
           asin: product.asin,

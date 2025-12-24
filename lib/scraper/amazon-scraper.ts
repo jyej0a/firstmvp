@@ -187,33 +187,71 @@ async function extractProductsFromPage(
     console.log("📋 페이지에서 상품 정보 추출 중...");
   }
 
-  // 상품 정보 추출 (다양한 selector 시도)
-  const products = await page.evaluate((verboseMode) => {
-    // 다양한 selector 패턴 시도
-    const selectors = [
-      '[data-component-type="s-search-result"]',
-      ".s-result-item",
-    ];
+  // 디버깅: 스크린샷 저장 (verbose 모드일 때만)
+  if (verbose) {
+    try {
+      const timestamp = Date.now();
+      const screenshotPath = `public/test-screenshots/amazon-debug-${timestamp}.png`;
+      await page.screenshot({ path: screenshotPath, fullPage: true });
+      console.log(`📸 디버깅 스크린샷 저장: ${screenshotPath}`);
+    } catch (error) {
+      console.warn("⚠️  스크린샷 저장 실패:", error);
+    }
+  }
 
+  // 먼저 페이지에서 selector 테스트 (Node.js 콘솔에 출력)
+  const selectors = [
+    '[data-component-type="s-search-result"]',
+    ".s-result-item",
+    '[data-asin]:not([data-asin=""])',
+    ".s-card-container",
+    '[data-index]',
+    ".s-result-list .s-result-item",
+    '[data-cel-widget*="search_result"]',
+    ".s-main-slot .s-result-item",
+  ];
+
+  if (verbose) {
+    console.log("🔍 Selector 테스트 시작...");
+    for (const selector of selectors) {
+      try {
+        const count = await page.$$eval(selector, (elements) => elements.length);
+        console.log(`   "${selector}": ${count}개 요소`);
+      } catch (error) {
+        console.log(`   "${selector}": 에러 (${error})`);
+      }
+    }
+  }
+
+  // 상품 정보 추출 (다양한 selector 시도)
+  const products = await page.evaluate((selectors, verboseMode) => {
     let productElements: Element[] = [];
+    let usedSelector = "";
+    
     for (const selector of selectors) {
       productElements = Array.from(document.querySelectorAll(selector));
       if (productElements.length > 0) {
-        if (verboseMode) {
-          console.log(`✅ Selector "${selector}"로 ${productElements.length}개 요소 발견`);
-        }
+        usedSelector = selector;
         break;
       }
     }
 
+    // 디버깅 정보 수집
+    const debugInfo = {
+      url: window.location.href,
+      title: document.title,
+      allAsins: Array.from(document.querySelectorAll('[data-asin]')).length,
+      hasSearchResult0: !!document.querySelector('[data-cel-widget="search_result_0"]'),
+      hasResultList: !!document.querySelector('.s-result-list'),
+      hasMainSlot: !!document.querySelector('.s-main-slot'),
+    };
+
     if (productElements.length === 0) {
-      if (verboseMode) {
-        console.warn("⚠️  상품 요소를 찾을 수 없습니다");
-        console.warn(`   - 시도한 selector: ${selectors.join(", ")}`);
-        console.warn(`   - 현재 URL: ${window.location.href}`);
-        console.warn(`   - 페이지 제목: ${document.title}`);
-      }
-      return [];
+      return { products: [], debugInfo, usedSelector: "" };
+    }
+    
+    if (verboseMode) {
+      console.log(`📊 ${usedSelector}로 ${productElements.length}개 요소 발견, 상품 정보 추출 시작...`);
     }
 
     const scrapedProducts: ScrapedProductRaw[] = [];
@@ -393,12 +431,27 @@ async function extractProductsFromPage(
       }
     });
 
-    return scrapedProducts;
-  }, verbose);
+    return { products: scrapedProducts, debugInfo, usedSelector };
+  }, selectors, verbose);
 
-  console.log(`✅ ${products.length}개 상품 추출 완료`);
+  // Node.js 콘솔에 디버깅 정보 출력
+  if (verbose) {
+    if (products.products.length === 0) {
+      console.warn("⚠️  상품 요소를 찾을 수 없습니다");
+      console.warn(`   - 현재 URL: ${products.debugInfo.url}`);
+      console.warn(`   - 페이지 제목: ${products.debugInfo.title}`);
+      console.warn(`   - data-asin 속성을 가진 요소: ${products.debugInfo.allAsins}개`);
+      console.warn(`   - [data-cel-widget="search_result_0"]: ${products.debugInfo.hasSearchResult0 ? "존재" : "없음"}`);
+      console.warn(`   - .s-result-list: ${products.debugInfo.hasResultList ? "존재" : "없음"}`);
+      console.warn(`   - .s-main-slot: ${products.debugInfo.hasMainSlot ? "존재" : "없음"}`);
+    }
+  }
+
+  const extractedProducts = products.products;
+
+  console.log(`✅ ${extractedProducts.length}개 상품 추출 완료`);
   
-  if (products.length === 0 && verbose) {
+  if (extractedProducts.length === 0 && verbose) {
     console.warn("⚠️  페이지에서 상품을 추출하지 못했습니다.");
     console.warn("   - 페이지 구조가 변경되었을 수 있습니다");
     console.warn("   - Bot detection으로 차단되었을 수 있습니다");
@@ -407,7 +460,7 @@ async function extractProductsFromPage(
 
   // 이미지 중복 제거 적용 (검색 결과 페이지 내에서)
   const { deduplicateImages } = await import("@/lib/utils/image-deduplicator");
-  const productsWithDeduplicatedImages = products.map((product) => ({
+  const productsWithDeduplicatedImages = extractedProducts.map((product) => ({
     ...product,
     images: deduplicateImages(product.images),
   }));
@@ -729,11 +782,40 @@ export async function scrapeAmazonProducts(
       timeout,
     });
     console.log("✅ 페이지 접속 완료\n");
+    
+    // 추가 대기 시간 (동적 콘텐츠 로딩)
+    if (verbose) {
+      console.log("⏳ 페이지 로딩 대기 중... (5초)");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5000));
 
     // 4. 페이지별로 상품 수집 (30개까지)
     while (allProducts.length < maxProducts) {
       pagesScraped++;
       console.log(`\n📄 === 페이지 ${pagesScraped} 수집 중 ===`);
+
+      // 페이지 로딩 후 스크롤하여 lazy loading된 콘텐츠 로드
+      if (pagesScraped === 1) {
+        console.log("📜 페이지 스크롤하여 상품 로드 중...");
+        // 점진적으로 스크롤 (lazy loading 트리거)
+        await page.evaluate(async () => {
+          const scrollStep = 500;
+          const scrollDelay = 300;
+          const maxScroll = document.body.scrollHeight;
+          
+          for (let position = 0; position < maxScroll; position += scrollStep) {
+            window.scrollTo(0, position);
+            await new Promise(resolve => setTimeout(resolve, scrollDelay));
+          }
+          
+          // 다시 위로 스크롤 (상품 목록이 보이도록)
+          window.scrollTo(0, 0);
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        });
+        console.log("✅ 스크롤 완료, 상품 로드 대기 중...");
+        // 추가 대기 시간 (동적 콘텐츠 로딩)
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
 
       // 현재 페이지에서 상품 추출
       const products = await extractProductsFromPage(page, verbose);
@@ -762,6 +844,9 @@ export async function scrapeAmazonProducts(
         console.log("\n⚠️  더 이상 페이지가 없습니다.");
         break;
       }
+      
+      // 다음 페이지 로딩 대기
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     }
 
     // 5. 결과 요약

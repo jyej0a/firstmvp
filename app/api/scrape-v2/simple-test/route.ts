@@ -141,7 +141,7 @@ export async function POST(request: NextRequest) {
         .map((p) => p.asin);
 
       const { data: products } = await supabase
-        .from("products")
+        .from("products_v2") // V2는 products_v2 테이블 사용
         .select("*")
         .in("asin", savedAsins)
         .eq("user_id", userId);

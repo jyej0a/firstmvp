@@ -53,13 +53,14 @@ export default function DashboardPage() {
     fetchProducts();
   }, []);
 
-  // 상품 목록 조회 함수
+  // 상품 목록 조회 함수 (V1: products_v1 테이블 조회)
   const fetchProducts = async () => {
     console.group('📋 [Dashboard V1] 상품 목록 조회');
     setIsLoadingProducts(true);
 
     try {
-      const response = await fetch('/api/products');
+      // V1은 products_v1 테이블 조회
+      const response = await fetch('/api/products?version=v1');
       const data: ApiResponse<{
         products: Product[];
         total: number;
@@ -90,7 +91,8 @@ export default function DashboardPage() {
     console.log(`새 마진율: ${newMargin}%`);
 
     try {
-      const response = await fetch(`/api/products/${productId}`, {
+      // V1은 products_v1 테이블 사용
+      const response = await fetch(`/api/products/${productId}?version=v1`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

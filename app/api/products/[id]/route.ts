@@ -6,9 +6,12 @@
  * 주요 사용 사례: 마진율 변경 시 판매가 자동 재계산 및 저장
  *
  * Endpoints:
- * - PATCH /api/products/[id] - 상품 정보 업데이트
- * - GET /api/products/[id] - 상품 상세 조회
- * - DELETE /api/products/[id] - 상품 삭제
+ * - PATCH /api/products/[id]?version=v1|v2 - 상품 정보 업데이트
+ * - GET /api/products/[id]?version=v1|v2 - 상품 상세 조회
+ * - DELETE /api/products/[id]?version=v1|v2 - 상품 삭제
+ *
+ * Query Parameters:
+ * - version: string (optional, default: 'v2') - 'v1' 또는 'v2' (조회할 테이블 선택)
  *
  * @see {@link /docs/TODO.md#2.16} - 구현 계획
  */
@@ -59,14 +62,30 @@ export async function GET(
     // 2. 상품 ID 추출
     const { id: productId } = await params;
 
-    console.log(`🔍 상품 조회 요청: ${productId}`);
+    // 3. 쿼리 파라미터 파싱 (version 구분)
+    const { searchParams } = new URL(request.url);
+    const version = searchParams.get("version") || "v2";
 
-    // 3. Supabase 클라이언트 생성
+    // version 검증
+    if (version !== "v1" && version !== "v2") {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "version 파라미터는 'v1' 또는 'v2'여야 합니다.",
+        } satisfies ApiResponse,
+        { status: 400 }
+      );
+    }
+
+    const tableName = version === "v1" ? "products_v1" : "products_v2";
+    console.log(`🔍 상품 조회 요청: ${productId} (version=${version}, table=${tableName})`);
+
+    // 4. Supabase 클라이언트 생성
     const supabase = await createClerkSupabaseClient();
 
-    // 4. 상품 조회
+    // 5. 상품 조회 (version에 따라 테이블 선택)
     const { data: product, error } = await supabase
-      .from("products")
+      .from(tableName)
       .select("*")
       .eq("id", productId)
       .eq("user_id", userId)
@@ -131,18 +150,38 @@ export async function PATCH(
 
     // 2. 상품 ID 추출
     const { id: productId } = await params;
-    console.log(`📦 상품 ID: ${productId}`);
 
-    // 3. 요청 바디 파싱
+    // 3. 쿼리 파라미터 파싱 (version 구분)
+    const { searchParams } = new URL(request.url);
+    const version = searchParams.get("version") || "v2";
+
+    // version 검증
+    if (version !== "v1" && version !== "v2") {
+      console.error("❌ 유효하지 않은 version 파라미터");
+      console.groupEnd();
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: "version 파라미터는 'v1' 또는 'v2'여야 합니다.",
+        } satisfies ApiResponse,
+        { status: 400 }
+      );
+    }
+
+    const tableName = version === "v1" ? "products_v1" : "products_v2";
+    console.log(`📦 상품 ID: ${productId} (version=${version}, table=${tableName})`);
+
+    // 4. 요청 바디 파싱
     const body: UpdateProductBody = await request.json();
     console.log("📝 업데이트 데이터:", body);
 
-    // 4. Supabase 클라이언트 생성
+    // 5. Supabase 클라이언트 생성
     const supabase = await createClerkSupabaseClient();
 
-    // 5. 기존 상품 조회
+    // 6. 기존 상품 조회 (version에 따라 테이블 선택)
     const { data: existingProduct, error: fetchError } = await supabase
-      .from("products")
+      .from(tableName)
       .select("*")
       .eq("id", productId)
       .eq("user_id", userId)
@@ -212,9 +251,9 @@ export async function PATCH(
       updateData.status = body.status;
     }
 
-    // 7. 데이터베이스 업데이트
+    // 7. 데이터베이스 업데이트 (version에 따라 테이블 선택)
     const { data: updatedProduct, error: updateError } = await supabase
-      .from("products")
+      .from(tableName)
       .update(updateData)
       .eq("id", productId)
       .eq("user_id", userId)
@@ -282,14 +321,30 @@ export async function DELETE(
     // 2. 상품 ID 추출
     const { id: productId } = await params;
 
-    console.log(`🗑️  상품 삭제 요청: ${productId}`);
+    // 3. 쿼리 파라미터 파싱 (version 구분)
+    const { searchParams } = new URL(request.url);
+    const version = searchParams.get("version") || "v2";
 
-    // 3. Supabase 클라이언트 생성
+    // version 검증
+    if (version !== "v1" && version !== "v2") {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "version 파라미터는 'v1' 또는 'v2'여야 합니다.",
+        } satisfies ApiResponse,
+        { status: 400 }
+      );
+    }
+
+    const tableName = version === "v1" ? "products_v1" : "products_v2";
+    console.log(`🗑️  상품 삭제 요청: ${productId} (version=${version}, table=${tableName})`);
+
+    // 4. Supabase 클라이언트 생성
     const supabase = await createClerkSupabaseClient();
 
-    // 4. 상품 삭제
+    // 5. 상품 삭제 (version에 따라 테이블 선택)
     const { error } = await supabase
-      .from("products")
+      .from(tableName)
       .delete()
       .eq("id", productId)
       .eq("user_id", userId);
