@@ -136,7 +136,7 @@ export default function DashboardPage() {
 
     try {
       console.log('📡 일괄 등록 API 요청 전송 중...');
-      const response = await fetch('/api/shopify/bulk-upload', {
+      const response = await fetch('/api/shopify/bulk-upload?version=v1', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -520,6 +520,7 @@ export default function DashboardPage() {
         onSelectionChange={setSelectedIds}
         onMarginChange={handleMarginChange}
         isLoading={isLoadingProducts}
+        version="v1"
       />
         </div>
       </div>

@@ -146,14 +146,14 @@ async function processDummyScraping(
         const { filterByBannedKeywords } = await import("@/lib/utils/filter-banned-keywords");
         const filtered = await filterByBannedKeywords([dummyProduct]);
 
-        if (filtered.filtered.length === 0) {
+        if (filtered.filteredProducts.length === 0) {
           console.log(`   ⚠️  금지어 필터링으로 제외됨`);
           failedCount++;
           continue;
         }
 
-        // DB 저장
-        const saveResult = await saveProductsToDatabase(filtered.filtered, userId);
+        // DB 저장 (V2는 products_v2 테이블 사용)
+        const saveResult = await saveProductsToDatabase(filtered.filteredProducts, userId, 'products_v2');
         if (saveResult.failed > 0) {
           console.log(`   ⚠️  DB 저장 실패`);
           failedCount++;
@@ -201,7 +201,38 @@ async function processDummyScraping(
           .eq("id", jobId);
 
         // 5초 대기 (테스트용, 실제는 60초)
-        await new Promise((resolve) => setTimeout(resolve, 5000));
+        // 대기 중에도 취소 상태 체크 (1초마다)
+        const waitTime = 5000; // 5초
+        const checkInterval = 1000; // 1초
+        const totalChecks = Math.ceil(waitTime / checkInterval);
+        
+        for (let i = 0; i < totalChecks; i++) {
+          await new Promise((resolve) => setTimeout(resolve, checkInterval));
+          
+          // 취소 상태 체크
+          const { data: checkJob } = await supabase
+            .from("scraping_jobs")
+            .select("status")
+            .eq("id", jobId)
+            .single();
+
+          if (checkJob?.status === "cancelled") {
+            console.log("🛑 Job 취소됨 (대기 중 감지)");
+            break; // 루프 종료
+          }
+        }
+        
+        // 대기 후 최종 취소 확인
+        const { data: finalCheck } = await supabase
+          .from("scraping_jobs")
+          .select("status")
+          .eq("id", jobId)
+          .single();
+
+        if (finalCheck?.status === "cancelled") {
+          console.log("🛑 Job 취소됨");
+          break; // 루프 종료
+        }
 
       } catch (itemError) {
         console.error(`❌ 상품 ${currentCount} 처리 실패:`, itemError);

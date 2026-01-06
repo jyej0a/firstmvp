@@ -40,6 +40,9 @@ interface ProductListProps {
 
   /** 로딩 상태 */
   isLoading?: boolean;
+
+  /** 버전 (v1 또는 v2, 기본값: v1) */
+  version?: 'v1' | 'v2';
 }
 
 /**
@@ -78,6 +81,7 @@ export default function ProductList({
   onSelectionChange,
   onMarginChange,
   isLoading = false,
+  version = 'v1',
 }: ProductListProps) {
   // 전체 선택 상태
   const [isAllSelected, setIsAllSelected] = useState(false);
@@ -233,8 +237,24 @@ export default function ProductList({
               <th className="p-3 text-left w-24">이미지</th>
               {/* 상품명 */}
               <th className="p-3 text-left min-w-[300px]">상품명</th>
+              {/* 카테고리 (v2 전용) */}
+              {version === 'v2' && (
+                <th className="p-3 text-left w-32">카테고리</th>
+              )}
+              {/* 브랜드 (v2 전용) */}
+              {version === 'v2' && (
+                <th className="p-3 text-left w-32">브랜드</th>
+              )}
               {/* ASIN */}
               <th className="p-3 text-left w-32">ASIN</th>
+              {/* 리뷰수/평점 (v2 전용) */}
+              {version === 'v2' && (
+                <th className="p-3 text-center w-32">리뷰/평점</th>
+              )}
+              {/* 무게 (v2 전용) */}
+              {version === 'v2' && (
+                <th className="p-3 text-right w-24">무게 (kg)</th>
+              )}
               {/* 아마존 가격 */}
               <th className="p-3 text-right w-28">아마존 가격</th>
               {/* 마진율 */}
@@ -294,12 +314,65 @@ export default function ProductList({
                   </p>
                 </td>
 
+                {/* 카테고리 (v2 전용) */}
+                {version === 'v2' && (
+                  <td className="p-3">
+                    <span className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 px-2 py-1 rounded-none">
+                      {product.category || 'N/A'}
+                    </span>
+                  </td>
+                )}
+
+                {/* 브랜드 (v2 전용) */}
+                {version === 'v2' && (
+                  <td className="p-3">
+                    <span className="text-sm text-muted-foreground">
+                      {product.brand || '-'}
+                    </span>
+                  </td>
+                )}
+
                 {/* ASIN */}
                 <td className="p-3">
                   <code className="text-xs bg-muted px-2 py-1 rounded-none">
                     {product.asin}
                   </code>
                 </td>
+
+                {/* 리뷰수/평점 (v2 전용) */}
+                {version === 'v2' && (
+                  <td className="p-3 text-center">
+                    {(product.reviewCount != null || product.rating != null) ? (
+                      <div className="flex flex-col items-center gap-1">
+                        {product.reviewCount != null && (
+                          <span className="text-xs text-muted-foreground">
+                            리뷰 {Number(product.reviewCount).toLocaleString()}개
+                          </span>
+                        )}
+                        {product.rating != null && (
+                          <span className="text-xs font-semibold text-yellow-600 dark:text-yellow-400">
+                            ⭐ {Number(product.rating).toFixed(1)}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">-</span>
+                    )}
+                  </td>
+                )}
+
+                {/* 무게 (v2 전용) */}
+                {version === 'v2' && (
+                  <td className="p-3 text-right">
+                    {product.weight != null ? (
+                      <span className="text-sm font-mono">
+                        {Number(product.weight).toFixed(3)} kg
+                      </span>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">-</span>
+                    )}
+                  </td>
+                )}
 
                 {/* 아마존 가격 */}
                 <td className="p-3 text-right">

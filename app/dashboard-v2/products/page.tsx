@@ -129,7 +129,7 @@ export default function ProductsPage() {
 
     try {
       console.log('📡 일괄 등록 API 요청 전송 중...');
-      const response = await fetch('/api/shopify/bulk-upload', {
+      const response = await fetch('/api/shopify/bulk-upload?version=v2', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -317,6 +317,7 @@ export default function ProductsPage() {
         onSelectionChange={setSelectedIds}
         onMarginChange={handleMarginChange}
         isLoading={isLoadingProducts}
+        version="v2"
       />
 
       {/* 페이지네이션 */}

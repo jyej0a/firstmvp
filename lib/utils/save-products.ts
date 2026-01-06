@@ -130,28 +130,37 @@ export async function saveProductsToDatabase(
         ? { options: product.variants }
         : null;
 
+      // v1과 v2에 따라 다른 필드 저장
+      const baseData = {
+        user_id: finalUserId,
+        asin: product.asin,
+        source_url: product.sourceUrl,
+        title: product.title,
+        images: product.images,
+        sourcing_type: "US", // 기본값: US 타입
+        amazon_price: product.amazonPrice,
+        margin_rate: 40, // 기본 마진율 40%
+        selling_price: sellingPrice,
+        status: "draft", // 초기 상태: draft
+        error_message: null,
+      };
+
+      // v2 전용: 새로운 스크래핑 요소 추가
+      const v2ExtraData = tableName === 'products_v2' ? {
+        description: product.description || null,
+        variants: variantsJson,
+        category: product.category || 'General',
+        review_count: product.reviewCount ?? null,
+        rating: product.rating ?? null,
+        brand: product.brand ?? null,
+        weight: product.weight ?? null,
+      } : {};
+
       // DB에 저장 (UPSERT) - ASIN만 unique 제약 사용
       const { error } = await supabase.from(tableName).upsert(
         {
-          user_id: finalUserId,
-          asin: product.asin,
-          source_url: product.sourceUrl,
-          title: product.title,
-          description: product.description || null,
-          images: product.images,
-          variants: variantsJson,
-          sourcing_type: "US", // 기본값: US 타입
-          amazon_price: product.amazonPrice,
-          margin_rate: 40, // 기본 마진율 40%
-          selling_price: sellingPrice,
-          status: "draft", // 초기 상태: draft
-          error_message: null,
-          category: product.category || 'General', // V1: 카테고리 필드 추가
-          // 추가 필드들 (nullable, 스크래핑 시 수집한 경우에만 저장)
-          review_count: product.reviewCount ?? null,
-          rating: product.rating ?? null,
-          brand: product.brand ?? null,
-          weight: product.weight ?? null,
+          ...baseData,
+          ...v2ExtraData,
         },
         {
           onConflict: "asin", // ASIN이 중복되면 업데이트

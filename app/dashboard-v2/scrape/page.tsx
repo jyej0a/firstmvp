@@ -20,6 +20,7 @@ import type { ApiResponse, Product } from '@/types';
 
 export default function ScrapePage() {
   const [searchInput, setSearchInput] = useState('');
+  const [targetCount, setTargetCount] = useState<string>(''); // 목표 개수
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
@@ -86,6 +87,9 @@ export default function ScrapePage() {
 
     try {
       console.log('📡 API 요청 전송 중...');
+      // 목표 개수: 입력값 있으면 사용, 없으면 1000개 (기본값)
+      const finalTargetCount = targetCount ? parseInt(targetCount, 10) : 1000;
+      
       const response = await fetch('/api/scrape-v2', {
         method: 'POST',
         headers: {
@@ -93,7 +97,7 @@ export default function ScrapePage() {
         },
         body: JSON.stringify({ 
           searchInput,
-          totalTarget: 1000, // 하루 최대 1000개
+          totalTarget: finalTargetCount,
         }),
       });
 
@@ -259,30 +263,53 @@ export default function ScrapePage() {
           Enter URL or Keyword
         </h2>
 
-        <div className="flex gap-2 mb-4">
-          <Input
-            placeholder="🔍 Enter keyword or paste Amazon URL..."
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && !isLoading && handleScrape()}
-            disabled={isLoading}
-            className="flex-1"
-          />
-          <Button
-            onClick={handleScrape}
-            disabled={!searchInput.trim() || isLoading}
-            className="px-8"
-          >
-            {isLoading ? 'Scraping...' : 'Start.'}
-          </Button>
-          <Button
-            onClick={handleDummyTest}
-            disabled={isLoading}
-            variant="outline"
-            title="Test with dummy data (5 products, 5s interval)"
-          >
-            🧪 Dummy Test
-          </Button>
+        <div className="space-y-3">
+          {/* 키워드 입력 */}
+          <div className="flex gap-2">
+            <Input
+              placeholder="🔍 Enter keyword or paste Amazon URL..."
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && !isLoading && handleScrape()}
+              disabled={isLoading}
+              className="flex-1"
+            />
+            <Button
+              onClick={handleScrape}
+              disabled={!searchInput.trim() || isLoading}
+              className="px-8"
+            >
+              {isLoading ? 'Scraping...' : 'Start.'}
+            </Button>
+            <Button
+              onClick={handleDummyTest}
+              disabled={isLoading}
+              variant="outline"
+              title="Test with dummy data (5 products, 5s interval)"
+            >
+              🧪 Dummy Test
+            </Button>
+          </div>
+
+          {/* 목표 개수 입력 (옵션) */}
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-muted-foreground whitespace-nowrap">
+              Target Count:
+            </label>
+            <Input
+              type="number"
+              placeholder="Leave empty for 1000 (default)"
+              value={targetCount}
+              onChange={(e) => setTargetCount(e.target.value)}
+              disabled={isLoading}
+              className="w-48"
+              min="1"
+              max="1000"
+            />
+            <span className="text-xs text-muted-foreground">
+              {targetCount ? `${targetCount} items` : '1000 items (default)'}
+            </span>
+          </div>
         </div>
 
         {/* 순차 처리 진행 상황 표시 */}

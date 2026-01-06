@@ -121,6 +121,32 @@ async function initPage(
 }
 
 /**
+ * 아마존 페이지에 통화를 USD로 설정하는 쿠키 추가
+ */
+async function setCurrencyToUSD(page: Page): Promise<void> {
+  try {
+    // 아마존 도메인에 쿠키 설정
+    await page.setCookie(
+      {
+        name: 'i18n-prefs',
+        value: 'USD',
+        domain: '.amazon.com',
+        path: '/',
+      },
+      {
+        name: 'lc-main',
+        value: 'en_US',
+        domain: '.amazon.com',
+        path: '/',
+      }
+    );
+  } catch (error) {
+    // 쿠키 설정 실패 시 무시 (일부 환경에서 제한될 수 있음)
+    console.warn('⚠️  통화 쿠키 설정 실패 (계속 진행):', error);
+  }
+}
+
+/**
  * 아마존 검색 결과 페이지에서 ASIN만 추출 (중복 체크용)
  * 
  * @param page - Puppeteer Page 객체
@@ -247,11 +273,14 @@ async function extractProductsFromPage(
     };
 
     if (productElements.length === 0) {
-      return { products: [], debugInfo, usedSelector: "" };
+      return { products: [], debugInfo, usedSelector: "", debugLogs: [] };
     }
     
+    // 디버깅 로그 수집 (Node.js 콘솔로 전달)
+    const debugLogs: string[] = [];
+    
     if (verboseMode) {
-      console.log(`📊 ${usedSelector}로 ${productElements.length}개 요소 발견, 상품 정보 추출 시작...`);
+      debugLogs.push(`📊 ${usedSelector}로 ${productElements.length}개 요소 발견, 상품 정보 추출 시작...`);
     }
 
     const scrapedProducts: ScrapedProductRaw[] = [];
@@ -267,10 +296,33 @@ async function extractProductsFromPage(
 
         // 제목 추출 (여러 selector 시도)
         const titleSelectors = [
+          // 기존 (우선순위 높음)
           "h2 a span",
           "h2 span",
           ".s-title-instructions-style h2 a span",
           "h2.s-line-clamp-2 a span",
+          
+          // 확장 1: 다양한 h2 구조
+          "h2 a",
+          "h2 .a-text-normal",
+          "h2.a-text-normal a",
+          ".s-title a span",
+          ".s-title span",
+          
+          // 확장 2: data 속성 기반
+          "[data-cy='title-recipe'] span",
+          "[data-cy='title-recipe'] a span",
+          "[data-component-type='s-product-image'] + div h2 a span",
+          
+          // 확장 3: 일반적인 링크 구조
+          "a.a-link-normal span.a-text-normal",
+          "a.a-link-normal .a-text-normal",
+          ".a-link-normal span",
+          
+          // 확장 4: 대체 구조
+          ".s-result-item h2 a",
+          ".s-result-item .s-title a",
+          "[data-asin] h2 a span",
         ];
 
         let title = "";
@@ -282,14 +334,60 @@ async function extractProductsFromPage(
           }
         }
 
-        if (!title) return; // 제목이 없으면 스킵
+        // 디버깅: 제목 추출 시도 결과 로그
+        if (verboseMode && !title) {
+          debugLogs.push(`  📝 제목 추출 시도 (상품 ${index + 1}):`);
+          for (const sel of titleSelectors) {
+            const found = element.querySelector(sel);
+            if (found) {
+              const text = found.textContent?.trim();
+              debugLogs.push(`     - "${sel}": ✅ 발견 (텍스트: "${text?.substring(0, 50)}...")`);
+              break;
+            } else {
+              debugLogs.push(`     - "${sel}": ❌ 없음`);
+            }
+          }
+        }
+
+        if (!title) {
+          if (verboseMode) {
+            debugLogs.push(`  ⚠️  상품 ${index + 1} 건너뜀: 제목 없음`);
+          }
+          return; // 제목이 없으면 스킵
+        }
 
         // 이미지 추출 (검색 결과 페이지에서 가능한 모든 이미지 수집)
         const images: string[] = [];
         const seenUrls = new Set<string>(); // 중복 체크용
 
-        // 1. 메인 썸네일 이미지
-        const mainImage = element.querySelector("img.s-image");
+        // 이미지 Selector 확장
+        const imageSelectors = [
+          // 기존
+          "img.s-image",
+          
+          // 확장 1: 다양한 이미지 클래스
+          "img[data-image-index]",
+          ".s-image",
+          "img.a-dynamic-image",
+          ".a-carousel-card img",
+          
+          // 확장 2: data 속성 기반
+          "img[data-src]",
+          "img[data-old-src]",
+          "[data-component-type='s-product-image'] img",
+          
+          // 확장 3: lazy loading 대응
+          "img[src*='amazon']",
+          "img[srcset]",
+        ];
+
+        // 1. 메인 썸네일 이미지 (여러 selector 시도)
+        let mainImage: HTMLImageElement | null = null;
+        for (const sel of imageSelectors) {
+          mainImage = element.querySelector(sel);
+          if (mainImage) break;
+        }
+
         if (mainImage) {
           // src 속성
           const src = mainImage.getAttribute("src");
@@ -368,61 +466,91 @@ async function extractProductsFromPage(
 
         // 가격 파싱 (숫자만 추출)
         const cleanPrice = priceText.replace(/[^0-9.]/g, "");
-        const hasDollarSymbol = priceText.includes("$");
         const amazonPrice = cleanPrice ? parseFloat(cleanPrice) : 0;
 
-        // 가격이 0이거나 비정상적으로 큰 경우(원화로 오인했을 가능성) 체크
-        if (amazonPrice > 10000 && !hasDollarSymbol) {
-          if (verboseMode) {
-            console.warn(`  ⚠️  비정상적으로 큰 가격 감지, 스킵: ${amazonPrice} (제목: ${title.substring(0, 30)}...)`);
+        // URL 추출 (여러 selector 시도)
+        const urlSelectors = [
+          // 기존
+          "h2 a",
+          "a.s-link-style",
+          
+          // 확장 1: 다양한 링크 구조
+          "a.a-link-normal",
+          ".s-title a",
+          "[data-cy='title-recipe'] a",
+          
+          // 확장 2: href 패턴 기반
+          "a[href*='/dp/']",
+          "a[href*='/gp/product/']",
+          "a[href*='/product/']",
+          
+          // 확장 3: 상대 경로 포함
+          "a[href^='/']",
+          
+          // 확장 4: data 속성 기반
+          "[data-component-type='s-product-image'] + div a",
+          ".s-result-item a[href*='amazon.com']",
+        ];
+
+        let linkElement: Element | null = null;
+        for (const sel of urlSelectors) {
+          linkElement = element.querySelector(sel);
+          if (linkElement) {
+            break;
           }
-          return; // 원화로 오인한 것 같으면 스킵
         }
 
-        // URL 추출
-        const linkElement = element.querySelector("h2 a, a.s-link-style");
         const relativeUrl = linkElement?.getAttribute("href") || "";
         const sourceUrl = relativeUrl
           ? `https://www.amazon.com${relativeUrl}`
           : "";
 
-        // 유효성 검증 (최소 필수 조건만 체크 - null 반환 방지)
-        // 필수: ASIN, 제목, URL
-        // 선택: 이미지, 가격 (없어도 허용, 나중에 수정 가능)
-        if (asin && title && sourceUrl) {
+        // 디버깅: URL 추출 시도 결과 로그
+        if (verboseMode && !sourceUrl) {
+          debugLogs.push(`  🔗 URL 추출 시도 (상품 ${index + 1}):`);
+          for (const sel of urlSelectors) {
+            const found = element.querySelector(sel);
+            if (found) {
+              const href = found.getAttribute("href");
+              debugLogs.push(`     - "${sel}": ✅ 발견 (href: "${href?.substring(0, 50)}...")`);
+              break;
+            } else {
+              debugLogs.push(`     - "${sel}": ❌ 없음`);
+            }
+          }
+        }
+
+        // 유효성 검증 (필수 필드 체크)
+        // 필수: ASIN, 제목, URL, 가격
+        if (asin && title && sourceUrl && amazonPrice > 0) {
           // 이미지가 없으면 빈 배열로 설정 (상세 페이지에서 수집 가능)
           const finalImages = images.length > 0 ? images : [];
-          
-          // 가격이 0이거나 없으면 기본값 설정 (나중에 수정 가능)
-          const finalPrice = amazonPrice > 0 ? amazonPrice : 0.01;
           
           scrapedProducts.push({
             asin,
             title,
             images: finalImages,
-            amazonPrice: finalPrice,
+            amazonPrice,
             sourceUrl,
           });
 
           if (verboseMode && index < 3) {
-            console.log(`  ${index + 1}. ${title} (${asin}) - $${finalPrice.toFixed(2)}`);
+            debugLogs.push(`  ${index + 1}. ${title} (${asin}) - $${amazonPrice.toFixed(2)}`);
             if (images.length === 0) {
-              console.warn(`     ⚠️  이미지 없음 (상세 페이지에서 수집 시도 예정)`);
-            }
-            if (amazonPrice <= 0) {
-              console.warn(`     ⚠️  가격 없음 (기본값 $0.01 설정, 나중에 수정 필요)`);
+              debugLogs.push(`     ⚠️  이미지 없음 (상세 페이지에서 수집 시도 예정)`);
             }
           }
         } else {
-          // 디버깅: 왜 상품이 제외되었는지 로그 (ASIN, 제목, URL이 없는 경우만)
+          // 디버깅: 왜 상품이 제외되었는지 로그
           if (verboseMode) {
             const reasons = [];
             if (!asin) reasons.push("ASIN 없음");
             if (!title) reasons.push("제목 없음");
             if (!sourceUrl) reasons.push("URL 없음");
+            if (amazonPrice <= 0) reasons.push("가격 없음");
             
-            if (reasons.length > 0 && index < 5) {
-              console.warn(`  ⚠️  상품 ${index + 1} 건너뜀: ${reasons.join(", ")} (필수 조건 미충족)`);
+            if (reasons.length > 0) {
+              debugLogs.push(`  ⚠️  상품 ${index + 1} 건너뜀: ${reasons.join(", ")} (필수 조건 미충족)`);
             }
           }
         }
@@ -431,11 +559,16 @@ async function extractProductsFromPage(
       }
     });
 
-    return { products: scrapedProducts, debugInfo, usedSelector };
+    return { products: scrapedProducts, debugInfo, usedSelector, debugLogs };
   }, selectors, verbose);
 
   // Node.js 콘솔에 디버깅 정보 출력
   if (verbose) {
+    // 브라우저 콘솔 로그를 Node.js 콘솔로 출력
+    if (products.debugLogs && products.debugLogs.length > 0) {
+      products.debugLogs.forEach((log) => console.log(log));
+    }
+    
     if (products.products.length === 0) {
       console.warn("⚠️  상품 요소를 찾을 수 없습니다");
       console.warn(`   - 현재 URL: ${products.debugInfo.url}`);
@@ -466,6 +599,102 @@ async function extractProductsFromPage(
   }));
 
   return productsWithDeduplicatedImages;
+}
+
+/**
+ * 상세 페이지에서 카테고리 정보 추출
+ * 
+ * @param page - Puppeteer Page 객체
+ * @param productUrl - 상품 상세 페이지 URL
+ * @returns 카테고리 경로 문자열 (예: "Electronics > Computers > Laptops") 또는 null
+ */
+async function extractCategoryFromDetailPage(
+  page: Page,
+  productUrl: string
+): Promise<string | null> {
+  try {
+    console.log(`📂 상세 페이지 카테고리 수집: ${productUrl}`);
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/1db7e51e-5a9c-42ce-96bd-48f9db3728f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'amazon-scraper.ts:616',message:'extractCategory: checking URL',data:{currentUrl:page.url(),targetUrl:productUrl,needsGoto:page.url()!==productUrl},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
+    
+    // 이미 해당 페이지에 있다면 다시 이동하지 않음
+    if (page.url() !== productUrl) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/1db7e51e-5a9c-42ce-96bd-48f9db3728f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'amazon-scraper.ts:620',message:'extractCategory: calling page.goto',data:{targetUrl:productUrl},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
+      
+      await page.goto(productUrl, {
+        waitUntil: "networkidle2",
+        timeout: 30000,
+      });
+      // 페이지 로드 대기
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+
+    const category = await page.evaluate(() => {
+      // 방법 1: Breadcrumb 추출 (#wayfinding-breadcrumbs_feature_div)
+      const breadcrumbSelectors = [
+        "#wayfinding-breadcrumbs_feature_div",
+        "#nav-breadcrumb",
+        ".a-breadcrumb",
+        "[data-testid='breadcrumb']",
+        ".a-unordered-list.a-horizontal.a-size-small",
+      ];
+
+      for (const selector of breadcrumbSelectors) {
+        const breadcrumb = document.querySelector(selector);
+        if (breadcrumb) {
+          // 링크 텍스트 추출
+          const links = breadcrumb.querySelectorAll("a");
+          if (links.length > 0) {
+            const categories: string[] = [];
+            links.forEach((link) => {
+              const text = link.textContent?.trim();
+              // "Home"이나 "All" 같은 일반적인 항목 제외
+              if (text && !text.match(/^(Home|All|See all|Back to results)$/i)) {
+                categories.push(text);
+              }
+            });
+            if (categories.length > 0) {
+              return categories.join(" > ");
+            }
+          }
+        }
+      }
+
+      // 방법 2: 메타데이터에서 추출
+      const metaCategory = document.querySelector('meta[name="category"]');
+      if (metaCategory) {
+        const content = metaCategory.getAttribute("content");
+        if (content) {
+          return content;
+        }
+      }
+
+      // 방법 3: 페이지 제목이나 다른 메타 정보에서 추출 시도
+      const pageTitle = document.title;
+      // 제목에서 카테고리 패턴 찾기 (예: "Amazon.com: Electronics > Computers > Laptops")
+      const titleMatch = pageTitle.match(/:\s*([^:]+)$/);
+      if (titleMatch) {
+        return titleMatch[1].trim();
+      }
+
+      return null;
+    });
+
+    if (category) {
+      console.log(`✅ 카테고리 추출 성공: ${category}`);
+      return category;
+    } else {
+      console.warn(`⚠️  카테고리 추출 실패: ${productUrl}`);
+      return null;
+    }
+  } catch (error) {
+    console.error(`❌ 카테고리 추출 중 에러: ${productUrl}`, error);
+    return null;
+  }
 }
 
 /**
@@ -580,6 +809,465 @@ async function extractImagesFromDetailPage(
 }
 
 /**
+ * 상세 페이지에서 상품 설명 추출
+ * 
+ * @param page - Puppeteer Page 객체
+ * @param productUrl - 상품 상세 페이지 URL
+ * @returns 상품 설명 (HTML 또는 텍스트) 또는 null
+ */
+async function extractDescriptionFromDetailPage(
+  page: Page,
+  productUrl: string
+): Promise<string | null> {
+  try {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/1db7e51e-5a9c-42ce-96bd-48f9db3728f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'amazon-scraper.ts:823',message:'extractDescription: checking URL',data:{currentUrl:page.url(),targetUrl:productUrl,needsGoto:page.url()!==productUrl},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
+    
+    // 이미 해당 페이지에 있다면 다시 이동하지 않음
+    if (page.url() !== productUrl) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/1db7e51e-5a9c-42ce-96bd-48f9db3728f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'amazon-scraper.ts:825',message:'extractDescription: calling page.goto',data:{targetUrl:productUrl},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
+      
+      await page.goto(productUrl, {
+        waitUntil: "networkidle2",
+        timeout: 30000,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+
+    const description = await page.evaluate(() => {
+      // 방법 1: productDescription 섹션
+      const descriptionSelectors = [
+        "#productDescription",
+        "#feature-bullets",
+        "#productDescription_feature_div",
+        "#productDescription_feature_div .a-section",
+        ".productDescriptionWrapper",
+      ];
+
+      for (const selector of descriptionSelectors) {
+        const element = document.querySelector(selector);
+        if (element) {
+          // HTML 형태로 반환 (Shopify body_html에 사용)
+          const html = element.innerHTML?.trim();
+          if (html && html.length > 10) {
+            return html;
+          }
+        }
+      }
+
+      // 방법 2: 텍스트만 추출
+      const textSelectors = [
+        "#productDescription p",
+        "#feature-bullets ul li",
+        ".a-unordered-list.a-vertical.a-spacing-mini li",
+      ];
+
+      for (const selector of textSelectors) {
+        const elements = document.querySelectorAll(selector);
+        if (elements.length > 0) {
+          const texts: string[] = [];
+          elements.forEach((el) => {
+            const text = el.textContent?.trim();
+            if (text && text.length > 0) {
+              texts.push(text);
+            }
+          });
+          if (texts.length > 0) {
+            return texts.join("\n");
+          }
+        }
+      }
+
+      return null;
+    });
+
+    if (description) {
+      console.log(`✅ 상품 설명 추출 성공 (길이: ${description.length})`);
+      return description;
+    } else {
+      console.warn(`⚠️  상품 설명 추출 실패: ${productUrl}`);
+      return null;
+    }
+  } catch (error) {
+    console.error(`❌ 상품 설명 추출 중 에러: ${productUrl}`, error);
+    return null;
+  }
+}
+
+/**
+ * 상세 페이지에서 옵션 정보 (variants) 추출
+ * 
+ * @param page - Puppeteer Page 객체
+ * @param productUrl - 상품 상세 페이지 URL
+ * @returns 옵션 정보 배열 (예: ["Color: Black", "Size: Large"]) 또는 null
+ */
+async function extractVariantsFromDetailPage(
+  page: Page,
+  productUrl: string
+): Promise<string[] | null> {
+  try {
+    // 이미 해당 페이지에 있다면 다시 이동하지 않음
+    if (page.url() !== productUrl) {
+      await page.goto(productUrl, {
+        waitUntil: "networkidle2",
+        timeout: 30000,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+
+    const variants = await page.evaluate(() => {
+      const variantList: string[] = [];
+
+      // 방법 1: 색상 옵션
+      const colorSelectors = [
+        "#variation_color_name",
+        "#variation_color_name ul li",
+        "[data-attribute-name='color_name']",
+        ".a-button-selected[data-attribute-name='color_name']",
+      ];
+
+      for (const selector of colorSelectors) {
+        const element = document.querySelector(selector);
+        if (element) {
+          const selectedColor = element.getAttribute("title") || element.textContent?.trim();
+          if (selectedColor) {
+            variantList.push(`Color: ${selectedColor}`);
+            break;
+          }
+        }
+      }
+
+      // 방법 2: 크기 옵션
+      const sizeSelectors = [
+        "#variation_size_name",
+        "#variation_size_name ul li",
+        "[data-attribute-name='size_name']",
+        ".a-button-selected[data-attribute-name='size_name']",
+      ];
+
+      for (const selector of sizeSelectors) {
+        const element = document.querySelector(selector);
+        if (element) {
+          const selectedSize = element.getAttribute("title") || element.textContent?.trim();
+          if (selectedSize) {
+            variantList.push(`Size: ${selectedSize}`);
+            break;
+          }
+        }
+      }
+
+      // 방법 3: 일반적인 variation 선택자
+      const variationElements = document.querySelectorAll(
+        "[id^='variation_'], [data-attribute-name]"
+      );
+      variationElements.forEach((el) => {
+        const attrName = el.getAttribute("data-attribute-name");
+        const value = el.getAttribute("title") || el.textContent?.trim();
+        if (attrName && value && !variantList.some((v) => v.startsWith(`${attrName}:`))) {
+          variantList.push(`${attrName}: ${value}`);
+        }
+      });
+
+      return variantList.length > 0 ? variantList : null;
+    });
+
+    if (variants && variants.length > 0) {
+      console.log(`✅ 옵션 정보 추출 성공: ${variants.join(", ")}`);
+      return variants;
+    } else {
+      console.warn(`⚠️  옵션 정보 추출 실패: ${productUrl}`);
+      return null;
+    }
+  } catch (error) {
+    console.error(`❌ 옵션 정보 추출 중 에러: ${productUrl}`, error);
+    return null;
+  }
+}
+
+/**
+ * 상세 페이지에서 리뷰 개수 추출
+ * 
+ * @param page - Puppeteer Page 객체
+ * @param productUrl - 상품 상세 페이지 URL
+ * @returns 리뷰 개수 또는 null
+ */
+async function extractReviewCountFromDetailPage(
+  page: Page,
+  productUrl: string
+): Promise<number | null> {
+  try {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/1db7e51e-5a9c-42ce-96bd-48f9db3728f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'amazon-scraper.ts:1002',message:'extractReviewCount: checking URL',data:{currentUrl:page.url(),targetUrl:productUrl,needsGoto:page.url()!==productUrl},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
+    
+    // 이미 해당 페이지에 있다면 다시 이동하지 않음
+    if (page.url() !== productUrl) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/1db7e51e-5a9c-42ce-96bd-48f9db3728f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'amazon-scraper.ts:1004',message:'extractReviewCount: calling page.goto',data:{targetUrl:productUrl},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
+      
+      await page.goto(productUrl, {
+        waitUntil: "networkidle2",
+        timeout: 30000,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+
+    const reviewCount = await page.evaluate(() => {
+      // 방법 1: #acrCustomerReviewText
+      const reviewTextSelectors = [
+        "#acrCustomerReviewText",
+        "#acrCustomerReviewLink",
+        "#reviewsMedley h2",
+        "[data-hook='total-review-count']",
+        ".a-size-base.a-color-secondary",
+      ];
+
+      for (const selector of reviewTextSelectors) {
+        const element = document.querySelector(selector);
+        if (element) {
+          const text = element.textContent || element.innerText;
+          if (text) {
+            // 숫자 추출 (예: "1,234 ratings" 또는 "1,234 reviews")
+            const match = text.match(/([\d,]+)/);
+            if (match) {
+              const count = parseInt(match[1].replace(/,/g, ""), 10);
+              if (!isNaN(count) && count > 0) {
+                return count;
+              }
+            }
+          }
+        }
+      }
+
+      return null;
+    });
+
+    if (reviewCount !== null) {
+      console.log(`✅ 리뷰 개수 추출 성공: ${reviewCount}`);
+      return reviewCount;
+    } else {
+      console.warn(`⚠️  리뷰 개수 추출 실패: ${productUrl}`);
+      return null;
+    }
+  } catch (error) {
+    console.error(`❌ 리뷰 개수 추출 중 에러: ${productUrl}`, error);
+    return null;
+  }
+}
+
+/**
+ * 상세 페이지에서 평점 추출
+ * 
+ * @param page - Puppeteer Page 객체
+ * @param productUrl - 상품 상세 페이지 URL
+ * @returns 평점 (0-5 범위) 또는 null
+ */
+async function extractRatingFromDetailPage(
+  page: Page,
+  productUrl: string
+): Promise<number | null> {
+  try {
+    // 이미 해당 페이지에 있다면 다시 이동하지 않음
+    if (page.url() !== productUrl) {
+      await page.goto(productUrl, {
+        waitUntil: "networkidle2",
+        timeout: 30000,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+
+    const rating = await page.evaluate(() => {
+      // 방법 1: #acrPopover
+      const ratingSelectors = [
+        "#acrPopover",
+        "#acrCustomerReviewLink",
+        ".a-icon-alt",
+        "[data-hook='rating-out-of-text']",
+        ".a-size-base.a-color-base",
+      ];
+
+      for (const selector of ratingSelectors) {
+        const element = document.querySelector(selector);
+        if (element) {
+          const text = element.textContent || element.getAttribute("title") || element.innerText;
+          if (text) {
+            // "4.5 out of 5" 또는 "4.5" 패턴 추출
+            const match = text.match(/(\d+\.?\d*)\s*(?:out of\s*)?5/);
+            if (match) {
+              const ratingValue = parseFloat(match[1]);
+              if (!isNaN(ratingValue) && ratingValue >= 0 && ratingValue <= 5) {
+                return ratingValue;
+              }
+            }
+            // 단순 숫자 패턴 (예: "4.5")
+            const simpleMatch = text.match(/(\d+\.?\d*)/);
+            if (simpleMatch) {
+              const ratingValue = parseFloat(simpleMatch[1]);
+              if (!isNaN(ratingValue) && ratingValue >= 0 && ratingValue <= 5) {
+                return ratingValue;
+              }
+            }
+          }
+        }
+      }
+
+      return null;
+    });
+
+    if (rating !== null) {
+      console.log(`✅ 평점 추출 성공: ${rating}`);
+      return rating;
+    } else {
+      console.warn(`⚠️  평점 추출 실패: ${productUrl}`);
+      return null;
+    }
+  } catch (error) {
+    console.error(`❌ 평점 추출 중 에러: ${productUrl}`, error);
+    return null;
+  }
+}
+
+/**
+ * 상세 페이지에서 브랜드명 추출
+ * 
+ * @param page - Puppeteer Page 객체
+ * @param productUrl - 상품 상세 페이지 URL
+ * @returns 브랜드명 또는 null
+ */
+async function extractBrandFromDetailPage(
+  page: Page,
+  productUrl: string
+): Promise<string | null> {
+  try {
+    // 이미 해당 페이지에 있다면 다시 이동하지 않음
+    if (page.url() !== productUrl) {
+      await page.goto(productUrl, {
+        waitUntil: "networkidle2",
+        timeout: 30000,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+
+    const brand = await page.evaluate(() => {
+      // 방법 1: #bylineInfo
+      const brandSelectors = [
+        "#bylineInfo",
+        ".po-brand",
+        "#brand",
+        "[data-brand]",
+        ".a-link-normal[href*='/s?k=']",
+        "#productTitle + .a-link-normal",
+      ];
+
+      for (const selector of brandSelectors) {
+        const element = document.querySelector(selector);
+        if (element) {
+          const text = element.textContent?.trim() || element.getAttribute("data-brand");
+          if (text && text.length > 0 && text.length < 100) {
+            // "Visit the [Brand] Store" 같은 패턴에서 브랜드명만 추출
+            const brandMatch = text.match(/Visit the (.+?) Store/i);
+            if (brandMatch) {
+              return brandMatch[1].trim();
+            }
+            // 일반적인 브랜드명
+            return text;
+          }
+        }
+      }
+
+      return null;
+    });
+
+    if (brand) {
+      console.log(`✅ 브랜드명 추출 성공: ${brand}`);
+      return brand;
+    } else {
+      console.warn(`⚠️  브랜드명 추출 실패: ${productUrl}`);
+      return null;
+    }
+  } catch (error) {
+    console.error(`❌ 브랜드명 추출 중 에러: ${productUrl}`, error);
+    return null;
+  }
+}
+
+/**
+ * 상세 페이지에서 무게 정보 추출
+ * 
+ * @param page - Puppeteer Page 객체
+ * @param productUrl - 상품 상세 페이지 URL
+ * @returns 무게 (킬로그램 단위) 또는 null
+ */
+async function extractWeightFromDetailPage(
+  page: Page,
+  productUrl: string
+): Promise<number | null> {
+  try {
+    // 이미 해당 페이지에 있다면 다시 이동하지 않음
+    if (page.url() !== productUrl) {
+      await page.goto(productUrl, {
+        waitUntil: "networkidle2",
+        timeout: 30000,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+
+    const weight = await page.evaluate(() => {
+      // "Item Weight" 또는 "Product Dimensions" 섹션 찾기
+      const productDetailsSelectors = [
+        "#productDetails_techSpec_section_1",
+        "#productDetails_feature_div",
+        ".prodDetTable",
+        "#detailBullets_feature_div",
+      ];
+
+      for (const selector of productDetailsSelectors) {
+        const section = document.querySelector(selector);
+        if (section) {
+          const text = section.textContent || section.innerText;
+          if (text) {
+            // "Item Weight" 패턴 찾기
+            const weightMatch = text.match(/Item Weight[:\s]+([\d.]+)\s*(pounds?|lbs?|ounces?|oz|kilograms?|kg|grams?|g)/i);
+            if (weightMatch) {
+              const value = parseFloat(weightMatch[1]);
+              const unit = weightMatch[2].toLowerCase();
+
+              // 단위 변환 (킬로그램으로 통일)
+              if (unit.includes("pound") || unit.includes("lb")) {
+                return value * 0.453592; // 파운드 → 킬로그램
+              } else if (unit.includes("ounce") || unit.includes("oz")) {
+                return value * 0.0283495; // 온스 → 킬로그램
+              } else if (unit.includes("gram") || unit.includes("g")) {
+                return value / 1000; // 그램 → 킬로그램
+              } else if (unit.includes("kilogram") || unit.includes("kg")) {
+                return value; // 이미 킬로그램
+              }
+            }
+          }
+        }
+      }
+
+      return null;
+    });
+
+    if (weight !== null) {
+      console.log(`✅ 무게 추출 성공: ${weight.toFixed(3)} kg`);
+      return parseFloat(weight.toFixed(3));
+    } else {
+      console.warn(`⚠️  무게 추출 실패: ${productUrl}`);
+      return null;
+    }
+  } catch (error) {
+    console.error(`❌ 무게 추출 중 에러: ${productUrl}`, error);
+    return null;
+  }
+}
+
+/**
  * 단일 상품 수집 (순차 처리용)
  *
  * @param searchUrl - 아마존 검색 URL
@@ -601,16 +1289,36 @@ export async function scrapeSingleProduct(
   try {
     // 1. 브라우저 초기화
     browser = await initBrowser(headless);
-    const page = await initPage(browser, timeout);
+    
+    // 2. 페이지 생성 및 설정 (영어/달러 강제 설정)
+    // 가격이 필수 필드이므로 달러 가격만 추출하기 위해 영어/달러 강제
+    const page = await initPage(browser, timeout, { forceEnglish: true });
 
-    // 2. 페이지네이션 계산 (페이지당 약 16개 상품 가정)
+    // 3. 통화를 USD로 설정 (페이지 접속 전 쿠키 설정)
+    await setCurrencyToUSD(page);
+
+    // 4. 페이지네이션 계산 (페이지당 약 16개 상품 가정)
     const productsPerPage = 16;
     const targetPage = Math.floor(offset / productsPerPage) + 1;
     const targetIndex = offset % productsPerPage;
 
-    // 3. 해당 페이지로 이동
+    // 5. URL에 언어 및 통화 파라미터 추가
+    const finalUrl = (() => {
+      const url = new URL(searchUrl);
+      // 언어 파라미터 추가 (없는 경우에만)
+      if (!url.searchParams.has('language')) {
+        url.searchParams.set('language', 'en_US');
+      }
+      // 통화 파라미터 확인 및 추가
+      if (!url.searchParams.has('currency')) {
+        url.searchParams.set('currency', 'USD');
+      }
+      return url.toString();
+    })();
+
+    // 6. 해당 페이지로 이동
     if (targetPage > 1) {
-      const pageUrl = new URL(searchUrl);
+      const pageUrl = new URL(finalUrl);
       pageUrl.searchParams.set("page", String(targetPage));
       const paginatedUrl = pageUrl.toString();
 
@@ -621,7 +1329,7 @@ export async function scrapeSingleProduct(
       });
     } else {
       console.log(`📄 첫 페이지 접속`);
-      await page.goto(searchUrl, {
+      await page.goto(finalUrl, {
         waitUntil: "networkidle2",
         timeout,
       });
@@ -674,16 +1382,71 @@ export async function scrapeSingleProduct(
       product = products[targetIndex];
     }
 
-    // 상세 페이지에서 추가 이미지 수집
+    // 상세 페이지에서 추가 정보 수집 (이미지, 카테고리, 설명, 옵션, 리뷰수, 평점, 브랜드명, 무게)
     if (product.sourceUrl) {
-      const detailImages = await extractImagesFromDetailPage(page, product.sourceUrl);
+      console.log(`📦 상세 페이지 추가 정보 수집 시작: ${product.sourceUrl}`);
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/1db7e51e-5a9c-42ce-96bd-48f9db3728f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'amazon-scraper.ts:1363',message:'Before page.goto',data:{currentUrl:page.url(),targetUrl:product.sourceUrl},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
+      
+      // 상세 페이지로 이동 (한 번만 이동하여 모든 정보 수집)
+      if (page.url() !== product.sourceUrl) {
+        await page.goto(product.sourceUrl, {
+          waitUntil: "networkidle2",
+          timeout: 30000,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/1db7e51e-5a9c-42ce-96bd-48f9db3728f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'amazon-scraper.ts:1377',message:'After page.goto',data:{currentUrl:page.url()},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
 
-      // 중복 제거 유틸리티 사용
+      // 병렬로 모든 정보 수집 (페이지는 이미 로드되어 있으므로 page.evaluate만 사용)
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/1db7e51e-5a9c-42ce-96bd-48f9db3728f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'amazon-scraper.ts:1384',message:'Starting Promise.all',data:{timestamp:Date.now()},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
+      
+      const [
+        detailImages,
+        category,
+        description,
+        variants,
+        reviewCount,
+        rating,
+        brand,
+        weight,
+      ] = await Promise.all([
+        extractImagesFromDetailPage(page, product.sourceUrl),
+        extractCategoryFromDetailPage(page, product.sourceUrl),
+        extractDescriptionFromDetailPage(page, product.sourceUrl),
+        extractVariantsFromDetailPage(page, product.sourceUrl),
+        extractReviewCountFromDetailPage(page, product.sourceUrl),
+        extractRatingFromDetailPage(page, product.sourceUrl),
+        extractBrandFromDetailPage(page, product.sourceUrl),
+        extractWeightFromDetailPage(page, product.sourceUrl),
+      ]);
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/1db7e51e-5a9c-42ce-96bd-48f9db3728f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'amazon-scraper.ts:1407',message:'Promise.all completed',data:{category,reviewCount,rating,brand,weight,hasDescription:!!description,variantsCount:variants?.length||0,imagesCount:detailImages?.length||0},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
+
+      // 이미지 병합 및 중복 제거
       const { deduplicateImages } = await import("@/lib/utils/image-deduplicator");
       const allImages = deduplicateImages([...product.images, ...detailImages]);
-
-      // 상세 페이지 이미지와 병합
       product.images = allImages;
+
+      // 나머지 필드 할당
+      if (category) product.category = category;
+      if (description) product.description = description;
+      if (variants && variants.length > 0) product.variants = variants;
+      if (reviewCount !== null) product.reviewCount = reviewCount;
+      if (rating !== null) product.rating = rating;
+      if (brand) product.brand = brand;
+      if (weight !== null) product.weight = weight;
+
+      console.log(`✅ 상세 페이지 추가 정보 수집 완료`);
     }
 
     console.log(
@@ -761,21 +1524,27 @@ export async function scrapeAmazonProducts(
     // 1. 브라우저 초기화
     browser = await initBrowser(headless);
 
-    // 2. 페이지 생성 및 설정 (V1: 영어 강제 설정)
-    const page = await initPage(browser, timeout, { forceEnglish: options.forceEnglish });
+    // 2. 페이지 생성 및 설정 (영어/달러 강제 설정)
+    // 가격이 필수 필드이므로 달러 가격만 추출하기 위해 영어/달러 강제
+    const page = await initPage(browser, timeout, { forceEnglish: true });
 
-    // 3. 첫 페이지 접속 (언어 파라미터 추가 - V1 전용)
+    // 3. 통화를 USD로 설정 (페이지 접속 전 쿠키 설정)
+    await setCurrencyToUSD(page);
+
+    // 4. 첫 페이지 접속 (언어 파라미터 추가)
     console.log("🌍 아마존 검색 페이지 접속 중...");
-    const finalUrl = options.forceEnglish 
-      ? (() => {
-          const url = new URL(searchUrl);
-          // 언어 파라미터 추가 (없는 경우에만)
-          if (!url.searchParams.has('language')) {
-            url.searchParams.set('language', 'en_US');
-          }
-          return url.toString();
-        })()
-      : searchUrl;
+    const finalUrl = (() => {
+      const url = new URL(searchUrl);
+      // 언어 파라미터 추가 (없는 경우에만)
+      if (!url.searchParams.has('language')) {
+        url.searchParams.set('language', 'en_US');
+      }
+      // 통화 파라미터 확인 및 추가
+      if (!url.searchParams.has('currency')) {
+        url.searchParams.set('currency', 'USD');
+      }
+      return url.toString();
+    })();
     
     await page.goto(finalUrl, {
       waitUntil: "networkidle2",
