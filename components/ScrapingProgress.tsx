@@ -15,7 +15,7 @@
 
 import { useEffect, useState } from "react";
 import { useScrapingProgress } from "@/hooks/use-scraping-progress";
-import { Loader2, CheckCircle2, XCircle, Clock, Square, Pause, Play, RotateCcw } from "lucide-react";
+import { Loader2, CheckCircle2, XCircle, Clock, Square, Pause, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -87,31 +87,75 @@ export default function ScrapingProgress({
   const [isCancelling, setIsCancelling] = useState(false);
   const [isPausing, setIsPausing] = useState(false);
   const [isResuming, setIsResuming] = useState(false);
-  const [showResumeDialog, setShowResumeDialog] = useState(false);
   const [elapsedTime, setElapsedTime] = useState<number>(0); // 초 단위
+  const [showStopDialog, setShowStopDialog] = useState(false); // 중지 선택 Dialog
+  const [pausedAt, setPausedAt] = useState<number | null>(null); // 일시 중지 시점 (timestamp)
+  const [totalPausedDuration, setTotalPausedDuration] = useState<number>(0); // 누적 일시 중지 시간 (초)
+
+  // 디버그: progress 객체 출력
+  useEffect(() => {
+    if (progress) {
+      console.log("📊 [ScrapingProgress] progress 객체:", {
+        status: progress.status,
+        currentCount: progress.currentCount,
+        totalTarget: progress.totalTarget,
+        successCount: progress.successCount,
+        failedCount: progress.failedCount,
+        progressPercentage: progress.progressPercentage,
+      });
+    }
+  }, [progress]);
+
+  // 일시 중지/재개 시 누적 시간 관리
+  useEffect(() => {
+    if (!progress) return;
+
+    // paused 상태가 되면 현재 시간 기록
+    if (progress.status === "paused" && pausedAt === null) {
+      setPausedAt(Date.now());
+    }
+
+    // running 상태가 되면 (resume) 일시 중지된 시간 누적
+    if (progress.status === "running" && pausedAt !== null) {
+      const pausedDuration = Math.floor((Date.now() - pausedAt) / 1000);
+      setTotalPausedDuration(prev => prev + pausedDuration);
+      setPausedAt(null);
+    }
+  }, [progress?.status, pausedAt]);
 
   // 실 소요시간 계산 (초 단위로 업데이트)
   useEffect(() => {
     if (!progress?.startedAt) {
       setElapsedTime(0);
+      setTotalPausedDuration(0);
+      setPausedAt(null);
       return;
     }
 
     const updateElapsedTime = () => {
       const startTime = new Date(progress.startedAt!).getTime();
       const now = Date.now();
-      const elapsed = Math.floor((now - startTime) / 1000); // 초 단위
-      setElapsedTime(elapsed);
+      const totalElapsed = Math.floor((now - startTime) / 1000); // 전체 경과 시간 (초)
+      const actualElapsed = totalElapsed - totalPausedDuration; // 실제 실행 시간 (일시 중지 시간 제외)
+      setElapsedTime(actualElapsed);
     };
 
-    // 즉시 한 번 계산
-    updateElapsedTime();
+    // ✅ running 상태일 때만 시간 계산 및 업데이트
+    if (progress.status === "running") {
+      // 즉시 한 번 계산
+      updateElapsedTime();
+      
+      // 1초마다 업데이트
+      const interval = setInterval(updateElapsedTime, 1000);
+      return () => clearInterval(interval);
+    }
 
-    // 1초마다 업데이트
-    const interval = setInterval(updateElapsedTime, 1000);
-
-    return () => clearInterval(interval);
-  }, [progress?.startedAt]);
+    // ⏸️ paused 상태에서는 시간 계산 중단 (현재 elapsedTime 유지)
+    // ✅ completed, failed, cancelled 상태에서는 최종 시간 한 번만 계산
+    if (progress.status === "completed" || progress.status === "failed" || progress.status === "cancelled") {
+      updateElapsedTime();
+    }
+  }, [progress?.startedAt, progress?.status, totalPausedDuration]);
 
   // 완료 시 콜백 호출 (useEffect로 한 번만 호출되도록 처리)
   useEffect(() => {
@@ -120,13 +164,15 @@ export default function ScrapingProgress({
     }
   }, [progress?.status, onComplete]);
 
-  // Job 취소 핸들러
-  const handleCancel = async () => {
-    if (!confirm("수집 작업을 중단하시겠습니까? 진행 중인 작업은 저장되지만 이후 작업은 중단됩니다.")) {
-      return;
-    }
+  // 중지 Dialog 열기
+  const handleStopClick = () => {
+    setShowStopDialog(true);
+  };
 
+  // 완전 중지 핸들러
+  const handleCancelConfirm = async () => {
     setIsCancelling(true);
+    setShowStopDialog(false);
 
     try {
       const response = await fetch(`${apiPath}/${jobId}`, {
@@ -136,22 +182,23 @@ export default function ScrapingProgress({
       const data = await response.json();
 
       if (!response.ok || !data.success) {
-        throw new Error(data.error || "Job 취소에 실패했습니다.");
+        throw new Error(data.error || "작업 중단에 실패했습니다.");
       }
 
-      console.log("✅ Job 취소 완료");
+      console.log("✅ 작업 완전 중지 완료");
       refetch(); // 상태 새로고침
     } catch (error) {
-      console.error("❌ Job 취소 실패:", error);
-      alert(error instanceof Error ? error.message : "Job 취소에 실패했습니다.");
+      console.error("❌ 작업 중단 실패:", error);
+      alert(error instanceof Error ? error.message : "작업 중단에 실패했습니다.");
     } finally {
       setIsCancelling(false);
     }
   };
 
-  // Job 일시 중지 핸들러
-  const handlePause = async () => {
+  // 일시 중지 핸들러
+  const handlePauseConfirm = async () => {
     setIsPausing(true);
+    setShowStopDialog(false);
 
     try {
       const response = await fetch(`${apiPath}/${jobId}`, {
@@ -165,23 +212,22 @@ export default function ScrapingProgress({
       const data = await response.json();
 
       if (!response.ok || !data.success) {
-        throw new Error(data.error || "Job 중지에 실패했습니다.");
+        throw new Error(data.error || "일시 중지에 실패했습니다.");
       }
 
-      console.log("✅ Job 중지 완료");
+      console.log("✅ 일시 중지 완료");
       refetch(); // 상태 새로고침
     } catch (error) {
-      console.error("❌ Job 중지 실패:", error);
-      alert(error instanceof Error ? error.message : "Job 중지에 실패했습니다.");
+      console.error("❌ 일시 중지 실패:", error);
+      alert(error instanceof Error ? error.message : "일시 중지에 실패했습니다.");
     } finally {
       setIsPausing(false);
     }
   };
 
-  // Job 재개 핸들러 (이어서 수집)
-  const handleResume = async (restart: boolean = false) => {
+  // 재개 핸들러 (이어서 수집)
+  const handleResume = async () => {
     setIsResuming(true);
-    setShowResumeDialog(false);
 
     try {
       const response = await fetch(`${apiPath}/${jobId}`, {
@@ -191,21 +237,20 @@ export default function ScrapingProgress({
         },
         body: JSON.stringify({
           action: "resume",
-          resumeMode: restart ? "restart" : "continue",
         }),
       });
 
       const data = await response.json();
 
       if (!response.ok || !data.success) {
-        throw new Error(data.error || "Job 재개에 실패했습니다.");
+        throw new Error(data.error || "재개에 실패했습니다.");
       }
 
-      console.log(`✅ Job 재개 완료 (${restart ? "처음부터 다시" : "이어서 수집"})`);
+      console.log("✅ 재개 완료 (이어서 수집)");
       refetch(); // 상태 새로고침
     } catch (error) {
-      console.error("❌ Job 재개 실패:", error);
-      alert(error instanceof Error ? error.message : "Job 재개에 실패했습니다.");
+      console.error("❌ 재개 실패:", error);
+      alert(error instanceof Error ? error.message : "재개에 실패했습니다.");
     } finally {
       setIsResuming(false);
     }
@@ -246,7 +291,7 @@ export default function ScrapingProgress({
   }
 
   // 상태별 아이콘 및 색상
-  const statusConfig = {
+  const statusConfig: Record<string, { icon: any; color: string; label: string; animate?: boolean }> = {
     pending: { icon: Clock, color: "text-muted-foreground", label: "대기 중" },
     running: { icon: Loader2, color: "text-blue-500", label: "진행 중", animate: true },
     paused: { icon: Pause, color: "text-yellow-500", label: "일시 중지" },
@@ -322,39 +367,30 @@ export default function ScrapingProgress({
         <div>
           <div className="text-sm text-muted-foreground">성공</div>
           <div className="text-xl font-semibold text-green-600">
-            {progress.successCount}개
+            {progress.successCount ?? 0}개
           </div>
         </div>
         <div>
           <div className="text-sm text-muted-foreground">실패</div>
           <div className="text-xl font-semibold text-destructive">
-            {progress.failedCount}개
+            {progress.failedCount ?? 0}개
           </div>
         </div>
       </div>
 
       {/* 버튼 영역 */}
       <div className="pt-2 border-t space-y-2">
-        {/* 진행 중일 때: 일시 중지 버튼 */}
+        {/* 진행 중일 때: 중지 버튼 */}
         {progress.status === "running" && (
           <Button
-            variant="outline"
-            size="sm"
-            onClick={handlePause}
-            disabled={isPausing}
-            className="w-full"
+            variant="destructive"
+            size="lg"
+            onClick={handleStopClick}
+            disabled={isPausing || isCancelling}
+            className="w-full bg-red-600 hover:bg-red-700 text-white font-bold text-base py-6"
           >
-            {isPausing ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                중지 중...
-              </>
-            ) : (
-              <>
-                <Pause className="h-4 w-4 mr-2" />
-                수집 중지
-              </>
-            )}
+            <Square className="h-5 w-5 mr-2" />
+            수집 중지
           </Button>
         )}
 
@@ -362,95 +398,94 @@ export default function ScrapingProgress({
         {progress.status === "paused" && (
           <Button
             variant="default"
-            size="sm"
-            onClick={() => setShowResumeDialog(true)}
+            size="lg"
+            onClick={handleResume}
             disabled={isResuming}
-            className="w-full"
+            className="w-full bg-green-600 hover:bg-green-700 text-white font-bold text-base py-6"
           >
             {isResuming ? (
               <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                <Loader2 className="h-5 w-5 mr-2 animate-spin" />
                 재개 중...
               </>
             ) : (
               <>
-                <Play className="h-4 w-4 mr-2" />
-                수집 재개
-              </>
-            )}
-          </Button>
-        )}
-
-        {/* 취소 버튼 (진행 중 또는 일시 중지 상태일 때) */}
-        {(progress.status === "running" || progress.status === "paused") && (
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={handleCancel}
-            disabled={isCancelling}
-            className="w-full"
-          >
-            {isCancelling ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                중단 중...
-              </>
-            ) : (
-              <>
-                <Square className="h-4 w-4 mr-2" />
-                수집 중단
+                <Play className="h-5 w-5 mr-2" />
+                재개 (이어서 수집)
               </>
             )}
           </Button>
         )}
       </div>
 
-      {/* 재개 옵션 선택 다이얼로그 */}
-      <Dialog open={showResumeDialog} onOpenChange={setShowResumeDialog}>
-        <DialogContent>
+      {/* 중지 선택 Dialog */}
+      <Dialog open={showStopDialog} onOpenChange={setShowStopDialog}>
+        <DialogContent className="bg-white dark:bg-gray-900 border-2 border-gray-300 dark:border-gray-700 shadow-2xl">
           <DialogHeader>
-            <DialogTitle>수집 재개 옵션 선택</DialogTitle>
-            <DialogDescription>
-              수집을 어떻게 재개하시겠습니까?
+            <DialogTitle className="text-xl font-bold">수집 중지</DialogTitle>
+            <DialogDescription className="text-base">
+              어떤 방식으로 중지하시겠습니까?
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2">
-            <Button
-              variant="outline"
-              className="w-full justify-start"
-              onClick={() => handleResume(false)}
-              disabled={isResuming}
-            >
-              <Play className="h-4 w-4 mr-2" />
-              <div className="text-left">
-                <div className="font-semibold">이어서 수집</div>
-                <div className="text-xs text-muted-foreground">
-                  현재 {progress.currentCount}개부터 계속 수집합니다.
-                </div>
-              </div>
-            </Button>
-            <Button
-              variant="outline"
-              className="w-full justify-start"
-              onClick={() => handleResume(true)}
-              disabled={isResuming}
-            >
-              <RotateCcw className="h-4 w-4 mr-2" />
-              <div className="text-left">
-                <div className="font-semibold">처음부터 다시 수집</div>
-                <div className="text-xs text-muted-foreground">
-                  카운트를 초기화하고 처음부터 다시 수집합니다.
-                </div>
-              </div>
-            </Button>
+          
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <h4 className="font-medium flex items-center gap-2">
+                <Pause className="h-4 w-4" />
+                일시 정지
+              </h4>
+              <p className="text-sm text-muted-foreground">
+                현재 진행 상황을 저장하고 일시 중지합니다. 나중에 이어서 수집할 수 있습니다.
+              </p>
+            </div>
+            
+            <div className="space-y-2">
+              <h4 className="font-medium flex items-center gap-2">
+                <Square className="h-4 w-4" />
+                완전 중지
+              </h4>
+              <p className="text-sm text-muted-foreground">
+                수집을 완전히 중단합니다. 이미 수집된 상품은 유지되지만, 재개할 수 없습니다.
+              </p>
+            </div>
           </div>
-          <DialogFooter>
+
+          <DialogFooter className="flex-col sm:flex-row gap-3 pt-4 border-t">
             <Button
-              variant="ghost"
-              onClick={() => setShowResumeDialog(false)}
-              disabled={isResuming}
+              variant="outline"
+              onClick={() => handlePauseConfirm()}
+              disabled={isPausing || isCancelling}
+              className="w-full sm:w-auto bg-yellow-50 hover:bg-yellow-100 border-2 border-yellow-500 text-yellow-900 font-semibold"
             >
-              취소
+              {isPausing ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  일시 정지 중...
+                </>
+              ) : (
+                <>
+                  <Pause className="h-4 w-4 mr-2" />
+                  일시 정지
+                </>
+              )}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => handleCancelConfirm()}
+              disabled={isPausing || isCancelling}
+              className="w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white font-semibold"
+            >
+              {isCancelling ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  완전 중지 중...
+                </>
+              ) : (
+                <>
+                  <Square className="h-4 w-4 mr-2" />
+                  완전 중지
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

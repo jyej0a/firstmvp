@@ -92,7 +92,25 @@ async function initPage(
   );
 
   // 언어 설정 (한글 상품명 방지 - V1 전용)
+  // 미국 아마존 강제 유지 (지역 리다이렉트 방지 - V2에서 variants 추출 위함)
   if (options?.forceEnglish) {
+    // 쿠키 설정 (amazon.com에 머물도록 강제)
+    await page.setCookie(
+      {
+        name: 'lc-main',
+        value: 'en_US',
+        domain: '.amazon.com',
+        path: '/',
+      },
+      {
+        name: 'i18n-prefs',
+        value: 'USD',
+        domain: '.amazon.com',
+        path: '/',
+      }
+    );
+    
+    // HTTP 헤더 설정
     await page.setExtraHTTPHeaders({
       'Accept-Language': 'en-US,en;q=0.9',
     });
@@ -500,24 +518,35 @@ async function extractProductsFromPage(
           }
         }
 
-        const relativeUrl = linkElement?.getAttribute("href") || "";
-        const sourceUrl = relativeUrl
-          ? `https://www.amazon.com${relativeUrl}`
-          : "";
+        // URL 추출 (우선순위: href 속성 > ASIN으로 생성)
+        let sourceUrl = "";
+        const href = linkElement?.getAttribute("href") || "";
+        
+        // href가 유효한 경로인지 확인 (#, javascript:void(0) 등 제외)
+        if (href && href !== "#" && !href.startsWith("javascript:")) {
+          // 절대 경로인 경우
+          if (href.startsWith("http")) {
+            sourceUrl = href;
+          }
+          // 상대 경로인 경우
+          else if (href.startsWith("/")) {
+            sourceUrl = `https://www.amazon.com${href}`;
+          }
+        }
+        
+        // href가 없거나 유효하지 않으면 ASIN으로 URL 생성
+        if (!sourceUrl && asin) {
+          sourceUrl = `https://www.amazon.com/dp/${asin}`;
+          if (verboseMode) {
+            debugLogs.push(`  🔗 URL을 ASIN으로부터 생성: ${sourceUrl}`);
+          }
+        }
 
         // 디버깅: URL 추출 시도 결과 로그
         if (verboseMode && !sourceUrl) {
           debugLogs.push(`  🔗 URL 추출 시도 (상품 ${index + 1}):`);
-          for (const sel of urlSelectors) {
-            const found = element.querySelector(sel);
-            if (found) {
-              const href = found.getAttribute("href");
-              debugLogs.push(`     - "${sel}": ✅ 발견 (href: "${href?.substring(0, 50)}...")`);
-              break;
-            } else {
-              debugLogs.push(`     - "${sel}": ❌ 없음`);
-            }
-          }
+          debugLogs.push(`     - href 값: "${href}"`);
+          debugLogs.push(`     - ASIN: "${asin}"`);
         }
 
         // 유효성 검증 (필수 필드 체크)
@@ -615,23 +644,8 @@ async function extractCategoryFromDetailPage(
   try {
     console.log(`📂 상세 페이지 카테고리 수집: ${productUrl}`);
     
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/1db7e51e-5a9c-42ce-96bd-48f9db3728f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'amazon-scraper.ts:616',message:'extractCategory: checking URL',data:{currentUrl:page.url(),targetUrl:productUrl,needsGoto:page.url()!==productUrl},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
-    
-    // 이미 해당 페이지에 있다면 다시 이동하지 않음
-    if (page.url() !== productUrl) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/1db7e51e-5a9c-42ce-96bd-48f9db3728f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'amazon-scraper.ts:620',message:'extractCategory: calling page.goto',data:{targetUrl:productUrl},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
-      
-      await page.goto(productUrl, {
-        waitUntil: "networkidle2",
-        timeout: 30000,
-      });
-      // 페이지 로드 대기
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-    }
+    // 페이지 이동 없이 현재 페이지에서 데이터 추출
+    // (scrapeSingleProduct에서 이미 페이지 이동 완료)
 
     const category = await page.evaluate(() => {
       // 방법 1: Breadcrumb 추출 (#wayfinding-breadcrumbs_feature_div)
@@ -820,22 +834,8 @@ async function extractDescriptionFromDetailPage(
   productUrl: string
 ): Promise<string | null> {
   try {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/1db7e51e-5a9c-42ce-96bd-48f9db3728f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'amazon-scraper.ts:823',message:'extractDescription: checking URL',data:{currentUrl:page.url(),targetUrl:productUrl,needsGoto:page.url()!==productUrl},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
-    
-    // 이미 해당 페이지에 있다면 다시 이동하지 않음
-    if (page.url() !== productUrl) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/1db7e51e-5a9c-42ce-96bd-48f9db3728f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'amazon-scraper.ts:825',message:'extractDescription: calling page.goto',data:{targetUrl:productUrl},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
-      
-      await page.goto(productUrl, {
-        waitUntil: "networkidle2",
-        timeout: 30000,
-      });
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-    }
+    // 페이지 이동 없이 현재 페이지에서 데이터 추출
+    // (scrapeSingleProduct에서 이미 페이지 이동 완료)
 
     const description = await page.evaluate(() => {
       // 방법 1: productDescription 섹션
@@ -909,19 +909,45 @@ async function extractVariantsFromDetailPage(
   productUrl: string
 ): Promise<string[] | null> {
   try {
-    // 이미 해당 페이지에 있다면 다시 이동하지 않음
-    if (page.url() !== productUrl) {
-      await page.goto(productUrl, {
-        waitUntil: "networkidle2",
-        timeout: 30000,
-      });
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-    }
+    // 페이지 이동 없이 현재 페이지에서 데이터 추출
+    // (scrapeSingleProduct에서 이미 페이지 이동 완료)
 
     const variants = await page.evaluate(() => {
       const variantList: string[] = [];
 
-      // 방법 1: 색상 옵션
+      // ==========================================
+      // 방법 1: inline-twister 셀렉터 (최신 아마존 구조)
+      // ==========================================
+      const dimensionTexts = document.querySelectorAll('[id^="inline-twister-expanded-dimension-text-"]');
+      dimensionTexts.forEach((el) => {
+        const id = el.id;
+        const text = el.textContent?.trim();
+        
+        if (!text || text === '') return;
+
+        // ID에서 옵션 타입 추출 (예: inline-twister-expanded-dimension-text-color_name -> color_name)
+        const match = id.match(/inline-twister-expanded-dimension-text-(.+)/);
+        if (match) {
+          const dimensionType = match[1]; // 예: "color_name", "size_name"
+          
+          // 옵션 이름 정리 (color_name -> Color, size_name -> Size)
+          let optionName = dimensionType.replace(/_name$/, '').replace(/_/g, ' ');
+          optionName = optionName.charAt(0).toUpperCase() + optionName.slice(1);
+          
+          variantList.push(`${optionName}: ${text}`);
+        }
+      });
+
+      // inline-twister로 찾았으면 반환
+      if (variantList.length > 0) {
+        return variantList;
+      }
+
+      // ==========================================
+      // 방법 2: 레거시 variation 셀렉터 (기존 구조)
+      // ==========================================
+
+      // 방법 2-1: 색상 옵션
       const colorSelectors = [
         "#variation_color_name",
         "#variation_color_name ul li",
@@ -940,7 +966,7 @@ async function extractVariantsFromDetailPage(
         }
       }
 
-      // 방법 2: 크기 옵션
+      // 방법 2-2: 크기 옵션
       const sizeSelectors = [
         "#variation_size_name",
         "#variation_size_name ul li",
@@ -959,7 +985,7 @@ async function extractVariantsFromDetailPage(
         }
       }
 
-      // 방법 3: 일반적인 variation 선택자
+      // 방법 2-3: 일반적인 variation 선택자
       const variationElements = document.querySelectorAll(
         "[id^='variation_'], [data-attribute-name]"
       );
@@ -999,22 +1025,8 @@ async function extractReviewCountFromDetailPage(
   productUrl: string
 ): Promise<number | null> {
   try {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/1db7e51e-5a9c-42ce-96bd-48f9db3728f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'amazon-scraper.ts:1002',message:'extractReviewCount: checking URL',data:{currentUrl:page.url(),targetUrl:productUrl,needsGoto:page.url()!==productUrl},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
-    
-    // 이미 해당 페이지에 있다면 다시 이동하지 않음
-    if (page.url() !== productUrl) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/1db7e51e-5a9c-42ce-96bd-48f9db3728f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'amazon-scraper.ts:1004',message:'extractReviewCount: calling page.goto',data:{targetUrl:productUrl},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
-      
-      await page.goto(productUrl, {
-        waitUntil: "networkidle2",
-        timeout: 30000,
-      });
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-    }
+    // 페이지 이동 없이 현재 페이지에서 데이터 추출
+    // (scrapeSingleProduct에서 이미 페이지 이동 완료)
 
     const reviewCount = await page.evaluate(() => {
       // 방법 1: #acrCustomerReviewText
@@ -1071,14 +1083,8 @@ async function extractRatingFromDetailPage(
   productUrl: string
 ): Promise<number | null> {
   try {
-    // 이미 해당 페이지에 있다면 다시 이동하지 않음
-    if (page.url() !== productUrl) {
-      await page.goto(productUrl, {
-        waitUntil: "networkidle2",
-        timeout: 30000,
-      });
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-    }
+    // 페이지 이동 없이 현재 페이지에서 데이터 추출
+    // (scrapeSingleProduct에서 이미 페이지 이동 완료)
 
     const rating = await page.evaluate(() => {
       // 방법 1: #acrPopover
@@ -1143,14 +1149,8 @@ async function extractBrandFromDetailPage(
   productUrl: string
 ): Promise<string | null> {
   try {
-    // 이미 해당 페이지에 있다면 다시 이동하지 않음
-    if (page.url() !== productUrl) {
-      await page.goto(productUrl, {
-        waitUntil: "networkidle2",
-        timeout: 30000,
-      });
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-    }
+    // 페이지 이동 없이 현재 페이지에서 데이터 추출
+    // (scrapeSingleProduct에서 이미 페이지 이동 완료)
 
     const brand = await page.evaluate(() => {
       // 방법 1: #bylineInfo
@@ -1207,14 +1207,8 @@ async function extractWeightFromDetailPage(
   productUrl: string
 ): Promise<number | null> {
   try {
-    // 이미 해당 페이지에 있다면 다시 이동하지 않음
-    if (page.url() !== productUrl) {
-      await page.goto(productUrl, {
-        waitUntil: "networkidle2",
-        timeout: 30000,
-      });
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-    }
+    // 페이지 이동 없이 현재 페이지에서 데이터 추출
+    // (scrapeSingleProduct에서 이미 페이지 이동 완료)
 
     const weight = await page.evaluate(() => {
       // "Item Weight" 또는 "Product Dimensions" 섹션 찾기
@@ -1386,10 +1380,6 @@ export async function scrapeSingleProduct(
     if (product.sourceUrl) {
       console.log(`📦 상세 페이지 추가 정보 수집 시작: ${product.sourceUrl}`);
       
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/1db7e51e-5a9c-42ce-96bd-48f9db3728f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'amazon-scraper.ts:1363',message:'Before page.goto',data:{currentUrl:page.url(),targetUrl:product.sourceUrl},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
-      
       // 상세 페이지로 이동 (한 번만 이동하여 모든 정보 수집)
       if (page.url() !== product.sourceUrl) {
         await page.goto(product.sourceUrl, {
@@ -1398,16 +1388,8 @@ export async function scrapeSingleProduct(
         });
         await new Promise((resolve) => setTimeout(resolve, 2000));
       }
-      
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/1db7e51e-5a9c-42ce-96bd-48f9db3728f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'amazon-scraper.ts:1377',message:'After page.goto',data:{currentUrl:page.url()},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
 
       // 병렬로 모든 정보 수집 (페이지는 이미 로드되어 있으므로 page.evaluate만 사용)
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/1db7e51e-5a9c-42ce-96bd-48f9db3728f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'amazon-scraper.ts:1384',message:'Starting Promise.all',data:{timestamp:Date.now()},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
-      
       const [
         detailImages,
         category,
@@ -1427,10 +1409,6 @@ export async function scrapeSingleProduct(
         extractBrandFromDetailPage(page, product.sourceUrl),
         extractWeightFromDetailPage(page, product.sourceUrl),
       ]);
-      
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/1db7e51e-5a9c-42ce-96bd-48f9db3728f6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'amazon-scraper.ts:1407',message:'Promise.all completed',data:{category,reviewCount,rating,brand,weight,hasDescription:!!description,variantsCount:variants?.length||0,imagesCount:detailImages?.length||0},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
 
       // 이미지 병합 및 중복 제거
       const { deduplicateImages } = await import("@/lib/utils/image-deduplicator");

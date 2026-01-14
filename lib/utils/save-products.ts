@@ -45,12 +45,12 @@ export interface SaveResult {
  * US 타입: amazonPrice × (1 + marginRate/100)
  * 
  * @param amazonPrice - 아마존 가격
- * @param marginRate - 마진율 (기본 40%)
+ * @param marginRate - 마진율 (기본 30%)
  * @returns 최종 판매 가격 (소수점 2자리)
  */
 function calculateSellingPrice(
   amazonPrice: number,
-  marginRate: number = 40
+  marginRate: number = 30
 ): number {
   const price = amazonPrice * (1 + marginRate / 100);
   return Math.round(price * 100) / 100; // 소수점 2자리
@@ -122,8 +122,8 @@ export async function saveProductsToDatabase(
         continue; // 다음 상품으로 건너뜀
       }
 
-      // 판매 가격 계산 (기본 마진율 40%)
-      const sellingPrice = calculateSellingPrice(product.amazonPrice, 40);
+      // 판매 가격 계산 (기본 마진율 30%)
+      const sellingPrice = calculateSellingPrice(product.amazonPrice, 30);
 
       // variants 처리: string[] -> JSONB
       const variantsJson = product.variants
@@ -139,7 +139,7 @@ export async function saveProductsToDatabase(
         images: product.images,
         sourcing_type: "US", // 기본값: US 타입
         amazon_price: product.amazonPrice,
-        margin_rate: 40, // 기본 마진율 40%
+        margin_rate: 30, // 기본 마진율 30%
         selling_price: sellingPrice,
         status: "draft", // 초기 상태: draft
         error_message: null,

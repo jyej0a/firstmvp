@@ -737,6 +737,28 @@ async function processSequentialScraping(
           }
 
           // DB 데이터를 Product 타입으로 변환 (snake_case → camelCase)
+          let finalCategory = productRow.category || 'General';
+          
+          // 카테고리가 있고 'General'이 아니면 쇼피파이 카테고리 매칭 시도
+          if (finalCategory && finalCategory !== 'General') {
+            try {
+              const { matchCategoryToShopify } = await import("@/lib/utils/category-matcher");
+              const matchResult = await matchCategoryToShopify(finalCategory);
+              
+              if (matchResult.success && matchResult.shopifyCategoryName) {
+                // 매칭 성공 시 쇼피파이 카테고리 이름 사용
+                finalCategory = matchResult.shopifyCategoryName;
+                console.log(`✅ 카테고리 매칭 성공: ${finalCategory} (신뢰도: ${matchResult.confidence?.toFixed(2)})`);
+              } else {
+                console.warn(`⚠️  카테고리 매칭 실패: ${finalCategory} → ${matchResult.error || '알 수 없는 오류'}`);
+                // 매칭 실패해도 원본 카테고리 사용
+              }
+            } catch (matchError) {
+              console.error("❌ 카테고리 매칭 중 에러:", matchError);
+              // 에러 발생 시 원본 카테고리 사용
+            }
+          }
+
           const product: Product = {
             id: productRow.id,
             userId: productRow.user_id,
@@ -746,7 +768,7 @@ async function processSequentialScraping(
             description: productRow.description,
             images: productRow.images,
             variants: productRow.variants,
-            category: productRow.category || 'General',
+            category: finalCategory,
             reviewCount: productRow.review_count ?? null,
             rating: productRow.rating ?? null,
             brand: productRow.brand ?? null,
@@ -808,6 +830,7 @@ async function processSequentialScraping(
           successCount++;
         } catch (shopifyError) {
           console.error("❌ Shopify 등록 실패:", shopifyError);
+          failedCount++; // 실패 카운트 증가
           // Shopify 등록 실패해도 다음 상품 계속 진행
           // Job Item은 'saved' 상태 유지 (나중에 수동 등록 가능)
         }
@@ -824,7 +847,55 @@ async function processSequentialScraping(
         lastRequestTime = Date.now();
         if (currentCount < totalTarget) {
           console.log(`⏳ 다음 수집까지 1분 대기 중...`);
-          await new Promise((resolve) => setTimeout(resolve, 60 * 1000));
+          
+          // 대기 중에도 취소/중지 상태 체크 (1초마다)
+          const waitTime = 60 * 1000; // 1분
+          const checkInterval = 1000; // 1초
+          const totalChecks = Math.ceil(waitTime / checkInterval);
+          
+          for (let i = 0; i < totalChecks; i++) {
+            await new Promise((resolve) => setTimeout(resolve, checkInterval));
+            
+            // 취소/중지 상태 체크
+            const checkJob = await supabase
+              .from("scraping_jobs")
+              .select("status")
+              .eq("id", jobId)
+              .single();
+
+            if (checkJob.data?.status === "cancelled") {
+              console.log(`🛑 Job 취소 감지, 대기 중단`);
+              console.groupEnd();
+              return; // 루프 종료
+            }
+
+            if (checkJob.data?.status === "paused") {
+              console.log(`⏸️  Job 일시 중지 감지, 프로세스 종료`);
+              console.log(`   현재 진행: ${currentCount}/${totalTarget}`);
+              console.groupEnd();
+              return;
+            }
+          }
+          
+          // 대기 후 최종 취소/중지 확인
+          const finalCheck = await supabase
+            .from("scraping_jobs")
+            .select("status")
+            .eq("id", jobId)
+            .single();
+
+          if (finalCheck.data?.status === "cancelled") {
+            console.log(`🛑 Job 취소 감지, 루프 종료`);
+            console.groupEnd();
+            return;
+          }
+
+          if (finalCheck.data?.status === "paused") {
+            console.log(`⏸️  Job 일시 중지 감지, 프로세스 종료`);
+            console.log(`   현재 진행: ${currentCount}/${totalTarget}`);
+            console.groupEnd();
+            return;
+          }
         }
       } catch (loopError) {
         console.error("❌ 루프 처리 중 오류:", loopError);
@@ -1104,19 +1175,32 @@ export async function pauseJob(jobId: string): Promise<boolean> {
       return false;
     }
 
-    // running 상태만 중지 가능
-    if (jobInfo.status !== "running") {
-      console.warn(`⚠️  Job이 ${jobInfo.status} 상태입니다. running 상태만 중지할 수 있습니다.`);
+    // 상태별 처리
+    let newStatus: "paused" | "cancelled" = "paused";
+    
+    // completed, failed, cancelled 상태는 이미 종료된 Job
+    if (["completed", "failed", "cancelled"].includes(jobInfo.status)) {
+      console.log(`ℹ️  Job이 이미 ${jobInfo.status} 상태입니다. cancelled로 변경합니다.`);
+      newStatus = "cancelled";
+    }
+    // running, pending 상태는 일시 중지
+    else if (["running", "pending"].includes(jobInfo.status)) {
+      console.log(`⏸️  Job을 일시 중지합니다 (현재 상태: ${jobInfo.status})`);
+      newStatus = "paused";
+    }
+    // paused 상태는 이미 중지됨
+    else if (jobInfo.status === "paused") {
+      console.log(`ℹ️  Job이 이미 paused 상태입니다.`);
       console.groupEnd();
-      return false;
+      return true; // 이미 중지되어 있으므로 성공으로 처리
     }
 
-    // Job 상태를 'paused'로 변경
+    // Job 상태 변경
     const pausedAt = new Date().toISOString();
     const { error } = await supabase
       .from("scraping_jobs")
       .update({
-        status: "paused",
+        status: newStatus,
         updated_at: pausedAt,
       })
       .eq("id", jobId);

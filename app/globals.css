@@ -3,25 +3,40 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* NanumBarunGothic 폰트 - 한글 전용 */
+/* DungGeunMo (둥근모) - 한글 전용, 픽셀/비트맵 스타일, 다마고치 느낌 */
 @font-face {
-  font-family: 'NanumBarunGothic';
-  src: url('//cdn.jsdelivr.net/font-nanumlight/1.0/NanumBarunGothicWeb.eot');
+  font-family: 'DungGeunMo';
+  src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_six@1.2/DungGeunMo.woff') format('woff');
   font-weight: 400;
+  font-style: normal;
   font-display: swap;
   unicode-range: U+AC00-D7AF, U+1100-11FF, U+3130-318F, U+A960-A97F, U+D7B0-D7FF;
 }
+
 @font-face {
-  font-family: 'NanumBarunGothic';
-  src: url('//cdn.jsdelivr.net/font-nanumlight/1.0/NanumBarunGothicWebBold.eot');
+  font-family: 'DungGeunMo';
+  src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_six@1.2/DungGeunMo.woff') format('woff');
   font-weight: 700;
+  font-style: normal;
   font-display: swap;
   unicode-range: U+AC00-D7AF, U+1100-11FF, U+3130-318F, U+A960-A97F, U+D7B0-D7FF;
 }
+
+/* Black Han Sans - 한글 전용, 헤딩용 */
 @font-face {
-  font-family: 'NanumBarunGothic';
-  src: url('//cdn.jsdelivr.net/font-nanumlight/1.0/NanumBarunGothicWebLight.eot');
-  font-weight: 300;
+  font-family: 'BlackHanSans';
+  src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_2107@1.1/BlackHanSans-Regular.woff') format('woff');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+AC00-D7AF, U+1100-11FF, U+3130-318F, U+A960-A97F, U+D7B0-D7FF;
+}
+
+@font-face {
+  font-family: 'BlackHanSans';
+  src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_2107@1.1/BlackHanSans-Regular.woff') format('woff');
+  font-weight: 700;
+  font-style: normal;
   font-display: swap;
   unicode-range: U+AC00-D7AF, U+1100-11FF, U+3130-318F, U+A960-A97F, U+D7B0-D7FF;
 }
@@ -145,14 +160,15 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-family: 'NanumBarunGothic', var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    /* 한글: DungGeunMo, 영문/숫자: 기존과 동일 */
+    font-family: 'DungGeunMo', var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   }
   main {
     @apply max-w-7xl mx-auto pt-16 px-4;
   }
   /* 헤딩만 픽셀 폰트 (가독성 유지) */
   h1, h2, h3, .font-pixel {
-    font-family: var(--font-pixel), var(--font-mono), ui-monospace, monospace;
+    font-family: 'BlackHanSans', 'DungGeunMo', var(--font-pixel), var(--font-mono), ui-monospace, monospace;
     letter-spacing: 0.02em;
   }
 }

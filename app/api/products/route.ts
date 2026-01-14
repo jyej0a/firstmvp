@@ -62,6 +62,7 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get("status"); // status 필터링 추가
     const jobId = searchParams.get("jobId"); // jobId 필터링 추가 (현재 Job에 속한 상품만 조회)
     const version = searchParams.get("version") || "v2"; // V1/V2 구분 (기본값: v2)
+    const todayKst = searchParams.get("todayKst") === "true"; // 오늘(KST) 필터링
 
     // version 검증
     if (version !== "v1" && version !== "v2") {
@@ -83,7 +84,9 @@ export async function GET(request: NextRequest) {
     }
 
     const tableName = version === "v1" ? "products_v1" : "products_v2";
-    console.log(`📊 조회 조건: version=${version}, table=${tableName}, limit=${limit}, offset=${offset}, status=${status || "all"}, jobId=${jobId || "all"}`);
+    console.log(
+      `📊 조회 조건: version=${version}, table=${tableName}, limit=${limit}, offset=${offset}, status=${status || "all"}, jobId=${jobId || "all"}, todayKst=${todayKst}`
+    );
 
     // 3. Supabase 클라이언트 생성
     const supabase = getServiceRoleClient();
@@ -124,6 +127,27 @@ export async function GET(request: NextRequest) {
       .from(tableName)
       .select("*")
       .eq("user_id", userId);
+
+    // 6.5 오늘(KST) 필터링 적용 (KST 00:00~익일 00:00 범위)
+    if (todayKst) {
+      const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+      const nowUtc = new Date();
+
+      // UTC 기반으로 KST 날짜를 만든 뒤, KST 자정을 계산 (timezone 영향을 피하려고 UTC API 사용)
+      const kstNow = new Date(nowUtc.getTime() + KST_OFFSET_MS);
+      kstNow.setUTCHours(0, 0, 0, 0); // KST 기준 00:00
+
+      const startUtc = new Date(kstNow.getTime() - KST_OFFSET_MS);
+      const endUtc = new Date(startUtc.getTime() + 24 * 60 * 60 * 1000);
+
+      const startIso = startUtc.toISOString();
+      const endIso = endUtc.toISOString();
+
+      console.log(`📅 오늘(KST) 필터 적용: created_at >= ${startIso} AND < ${endIso}`);
+
+      countQuery = countQuery.gte("created_at", startIso).lt("created_at", endIso);
+      dataQuery = dataQuery.gte("created_at", startIso).lt("created_at", endIso);
+    }
 
     // 6. jobId 필터링 적용 (V2 전용, 현재 Job에 속한 상품만 조회)
     if (version === "v2" && jobId) {
@@ -202,6 +226,11 @@ export async function GET(request: NextRequest) {
       description: row.description,
       images: row.images,
       variants: row.variants,
+      category: row.category || 'General', // V2 전용
+      reviewCount: row.review_count ?? null, // V2 전용
+      rating: row.rating ?? null, // V2 전용
+      brand: row.brand ?? null, // V2 전용
+      weight: row.weight ?? null, // V2 전용
       sourcingType: row.sourcing_type,
       amazonPrice: row.amazon_price,
       costPrice: row.cost_price,

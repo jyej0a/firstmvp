@@ -49,8 +49,8 @@ export default function ProductsPage() {
     try {
       const offset = (currentPage - 1) * itemsPerPage;
       const url = statusFilter === 'all'
-        ? `/api/products?limit=${itemsPerPage}&offset=${offset}`
-        : `/api/products?limit=${itemsPerPage}&offset=${offset}&status=${statusFilter}`;
+        ? `/api/products?version=v2&limit=${itemsPerPage}&offset=${offset}`
+        : `/api/products?version=v2&limit=${itemsPerPage}&offset=${offset}&status=${statusFilter}`;
 
       const response = await fetch(url);
       const data: ApiResponse<{

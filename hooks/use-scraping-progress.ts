@@ -2,7 +2,8 @@
  * @file hooks/use-scraping-progress.ts
  * @description 스크래핑 진행 상황 조회 React Hook
  *
- * 이 Hook은 Polling 방식으로 Job 진행 상황을 주기적으로 조회합니다.
+ * 이 Hook은 Supabase Realtime을 사용하여 이벤트 기반으로 Job 진행 상황을 조회합니다.
+ * 데이터베이스에 변경이 발생했을 때만 업데이트됩니다.
  *
  * @example
  * const { progress, isLoading, error } = useScrapingProgress(jobId);
@@ -14,6 +15,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useClerkSupabaseClient } from "@/lib/supabase/clerk-client";
 import type { JobProgress } from "@/lib/scraper/sequential-scraper";
 
 /**
@@ -43,12 +45,14 @@ export interface UseScrapingProgressResult {
  */
 export function useScrapingProgress(
   jobId: string | null,
-  pollingInterval: number = 5000,
+  pollingInterval: number = 5000, // 폴백용 (Realtime 실패 시 사용)
   apiPath: string = '/api/scrape'
 ): UseScrapingProgressResult {
   const [progress, setProgress] = useState<JobProgress | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const supabase = useClerkSupabaseClient();
+  const channelRef = useRef<any>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   /**
@@ -88,7 +92,7 @@ export function useScrapingProgress(
     fetchProgress();
   };
 
-  // Job ID가 변경되거나 컴포넌트 마운트 시 조회 시작
+  // Job ID가 변경되거나 컴포넌트 마운트 시 이벤트 구독 시작
   useEffect(() => {
     if (!jobId) {
       return;
@@ -97,29 +101,70 @@ export function useScrapingProgress(
     // 즉시 한 번 조회
     fetchProgress();
 
-    // Polling 시작
+    // Supabase Realtime 구독 (이벤트 기반)
+    const channel = supabase
+      .channel(`scraping-job-${jobId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'scraping_jobs',
+          filter: `id=eq.${jobId}`,
+        },
+        (payload) => {
+          console.log('📡 [Realtime] Job 상태 변경 감지:', payload.new);
+          // 데이터베이스 변경 시 최신 데이터 조회
+          fetchProgress();
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('✅ [Realtime] 구독 시작:', jobId);
+        } else if (status === 'CHANNEL_ERROR') {
+          console.warn('⚠️ [Realtime] 구독 실패, 폴링으로 폴백');
+          // Realtime 실패 시 폴링으로 폴백
     intervalRef.current = setInterval(() => {
       fetchProgress();
     }, pollingInterval);
+        }
+      });
 
-    // 정리 함수: 컴포넌트 언마운트 시 또는 jobId 변경 시 Polling 중지
+    channelRef.current = channel;
+
+    // 정리 함수: 컴포넌트 언마운트 시 또는 jobId 변경 시 구독 해제
     return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
     };
-  }, [jobId, pollingInterval, apiPath]);
+  }, [jobId, pollingInterval, apiPath, supabase]);
 
-  // Job이 완료되면 Polling 중지
+  // Job이 완료되거나 중지되면 구독 해제
   useEffect(() => {
-    if (progress && (progress.status === "completed" || progress.status === "failed" || progress.status === "cancelled")) {
+    if (progress && (
+      progress.status === "completed" || 
+      progress.status === "failed" || 
+      progress.status === "cancelled" ||
+      progress.status === "paused"
+    )) {
+      // 구독 해제
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+      // 폴링도 중지
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
     }
-  }, [progress]);
+  }, [progress, supabase]);
 
   return {
     progress,

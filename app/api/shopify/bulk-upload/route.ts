@@ -162,12 +162,33 @@ export async function POST(request: NextRequest) {
 
     console.log(`📦 등록 요청: ${product_ids.length}개 상품`);
 
-    // 3. Supabase 클라이언트 생성
+    // 3. 쿼리 파라미터 파싱 (version 구분)
+    const { searchParams } = new URL(request.url);
+    const version = searchParams.get("version") || "v2"; // 기본값: v2
+
+    // version 검증
+    if (version !== "v1" && version !== "v2") {
+      console.error("❌ 유효하지 않은 version 파라미터");
+      console.groupEnd();
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: "version 파라미터는 'v1' 또는 'v2'여야 합니다.",
+        } satisfies ApiResponse,
+        { status: 400 }
+      );
+    }
+
+    const tableName = version === "v1" ? "products_v1" : "products_v2";
+    console.log(`📊 조회 테이블: ${tableName} (version=${version})`);
+
+    // 4. Supabase 클라이언트 생성
     const supabase = getServiceRoleClient();
 
-    // 4. 상품 조회
+    // 5. 상품 조회 (version에 따라 테이블 선택)
     const { data: productsData, error: fetchError } = await supabase
-      .from("products")
+      .from(tableName)
       .select("*")
       .in("id", product_ids)
       .eq("user_id", userId);
@@ -230,7 +251,7 @@ export async function POST(request: NextRequest) {
 
         // DB 상태 업데이트 (error)
         await supabase
-          .from("products")
+          .from(tableName)
           .update({
             status: "error",
             error_message: validation.error,
@@ -253,7 +274,7 @@ export async function POST(request: NextRequest) {
 
           // DB 상태 업데이트 (uploaded)
           await supabase
-            .from("products")
+            .from(tableName)
             .update({
               status: "uploaded",
               error_message: null,
@@ -272,7 +293,7 @@ export async function POST(request: NextRequest) {
 
           // DB 상태 업데이트 (error)
           await supabase
-            .from("products")
+            .from(tableName)
             .update({
               status: "error",
               error_message: uploadResult.error,
@@ -293,7 +314,7 @@ export async function POST(request: NextRequest) {
 
         // DB 상태 업데이트 (error)
         await supabase
-          .from("products")
+          .from(tableName)
           .update({
             status: "error",
             error_message: errorMessage,

@@ -105,6 +105,7 @@ export async function GET(
     console.log(`✅ 진행 상황 조회 완료`);
     console.log(`   상태: ${progress.status}`);
     console.log(`   진행률: ${progress.progressPercentage}% (${progress.currentCount}/${progress.totalTarget})`);
+    console.log(`   성공: ${progress.successCount}개, 실패: ${progress.failedCount}개`);
     console.log(`   예상 남은 시간: ${Math.ceil(progress.estimatedTimeRemaining / 60)}분`);
     console.groupEnd();
 

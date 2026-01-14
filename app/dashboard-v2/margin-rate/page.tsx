@@ -15,8 +15,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
-const DEFAULT_US_MARGIN = 40;
-const DEFAULT_CN_MARGIN = 40;
+const DEFAULT_US_MARGIN = 30;
+const DEFAULT_CN_MARGIN = 30;
 const DEFAULT_SHIPPING = 5;
 const DEFAULT_EXTRA = 2;
 

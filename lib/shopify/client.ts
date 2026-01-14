@@ -21,6 +21,7 @@ import type {
   CreateProductResult,
   ShopifyImage,
   ShopifyVariant,
+  ShopifyOption,
 } from "@/types/shopify";
 
 /**
@@ -70,9 +71,15 @@ function validateShopifyConfig(): ConfigValidation {
  * Product 타입을 Shopify API 형식으로 변환
  * 
  * @param product - 변환할 상품 데이터
+ * @param shopifyCategoryId - (옵션) 매칭된 Shopify 카테고리 ID
+ * @param shopifyCategoryName - (옵션) 매칭된 Shopify 카테고리 이름
  * @returns Shopify API 요청 형식의 상품 데이터
  */
-function formatProductForShopify(product: Product): ShopifyProductInput {
+function formatProductForShopify(
+  product: Product,
+  shopifyCategoryId?: string,
+  shopifyCategoryName?: string
+): ShopifyProductInput {
   // 이미지 중복 제거 (이중 안전장치)
   const { deduplicateImages } = require("@/lib/utils/image-deduplicator");
   const uniqueImages = deduplicateImages(product.images);
@@ -89,25 +96,126 @@ function formatProductForShopify(product: Product): ShopifyProductInput {
   // 가격 포맷팅 (소수점 2자리)
   const price = product.sellingPrice.toFixed(2);
 
+  // Variants 처리: DB에 저장된 variants 정보 파싱
+  const variants: ShopifyVariant[] = [];
+  
   // 기본 variant 생성
-  const variants: ShopifyVariant[] = [
-    {
+  const baseVariant: ShopifyVariant = {
       price,
       sku: product.asin, // ASIN을 SKU로 사용
-      inventory_quantity: 0, // 드롭쉬핑이므로 재고 0
-    },
-  ];
+      inventory_quantity: 100, // 기본 재고 수량 100
+  };
 
-  return {
+  // 무게 정보 추가 (킬로그램 → 그램 변환)
+  if (product.weight !== null && product.weight !== undefined) {
+    baseVariant.weight = Math.round(product.weight * 1000); // 킬로그램 → 그램
+    baseVariant.weight_unit = "g";
+  }
+
+  // variants 옵션 파싱 및 Shopify options 생성
+  // DB에 저장된 형태:
+  //   - 배열: ["Color: Black", "Size: Large"]
+  //   - 또는 객체: { options: ["Color: Black", "Size: Large"] }
+  const shopifyOptions: ShopifyOption[] = [];
+  
+  if (product.variants) {
+    let optionsArray: string[] = [];
+
+    // 배열 형태인 경우 (현재 amazon-scraper.ts가 반환하는 형태)
+    if (Array.isArray(product.variants)) {
+      optionsArray = product.variants;
+    } 
+    // 객체 형태인 경우 (하위 호환성)
+    else if (typeof product.variants === 'object') {
+      const variantsData = product.variants as { options?: string[] };
+      if (variantsData.options && Array.isArray(variantsData.options)) {
+        optionsArray = variantsData.options;
+      }
+    }
+
+    // 옵션을 파싱하여:
+    // 1. baseVariant의 option1, option2, option3에 할당
+    // 2. Shopify options 배열 생성
+    // 예: "Color: Black" → { name: "Color", values: ["Black"] }
+    optionsArray.forEach((option, index) => {
+      if (!option || typeof option !== 'string') return;
+
+      // "Color: Black" 형태에서 이름과 값 분리
+      const colonIndex = option.indexOf(':');
+      let name = '';
+      let value = '';
+
+      if (colonIndex > -1) {
+        name = option.substring(0, colonIndex).trim();
+        value = option.substring(colonIndex + 1).trim();
+      } else {
+        // 콜론이 없으면 전체를 값으로 사용, 이름은 "Option N"
+        name = `Option ${index + 1}`;
+        value = option.trim();
+      }
+
+      if (!value) return;
+
+      // baseVariant에 옵션 값 설정
+      if (index === 0) {
+        baseVariant.option1 = value;
+      } else if (index === 1) {
+        baseVariant.option2 = value;
+      } else if (index === 2) {
+        baseVariant.option3 = value;
+      }
+
+      // Shopify options 배열에 추가
+      shopifyOptions.push({
+        name: name,
+        values: [value],
+      });
+    });
+  }
+
+  variants.push(baseVariant);
+
+  // 카테고리 처리
+  // 1. 매칭된 Shopify 카테고리 이름이 있으면 우선 사용
+  // 2. 없으면 DB의 category 필드에서 마지막 부분 추출
+  let productType = "General";
+  
+  if (shopifyCategoryName) {
+    // 매칭된 Shopify 카테고리가 있으면 마지막 부분만 추출하여 사용
+    const categoryParts = shopifyCategoryName.split(" > ");
+    productType = categoryParts[categoryParts.length - 1] || shopifyCategoryName;
+    console.log(`✅ 매칭된 카테고리를 product_type으로 설정: ${productType}`);
+  } else if (product.category && product.category !== "General") {
+    // 매칭 실패 시 아마존 카테고리 사용
+    const categoryParts = product.category.split(" > ");
+    productType = categoryParts[categoryParts.length - 1] || product.category;
+    console.log(`⚠️  매칭 실패, 아마존 카테고리 사용: ${productType}`);
+  }
+  
+  // 참고: Shopify Standard Product Taxonomy 카테고리 ID는 REST API에서 미지원
+  // GraphQL API로 전환 시 shopifyCategoryId 사용 가능
+
+  // 브랜드명 처리: DB에 저장된 브랜드명은 참고만 하고, 쇼피파이에는 "Talent Market"으로 통일
+  const vendor = "Talent Market";
+
+  // Shopify API 요청 데이터 생성
+  const shopifyProduct: ShopifyProductInput = {
     title: product.title,
     body_html: product.description || "",
-    vendor: "Trend-Hybrid",
-    product_type: "General",
+    vendor,
+    product_type: productType,
     status: "draft", // 기본값: draft (향후 옵션화 가능)
     images,
     variants,
-    tags: `amazon,${product.sourcingType},asin:${product.asin}`,
+    tags: `asin:${product.asin}`, // ASIN만 태그로 저장 (amazon, US 등 제외)
   };
+
+  // options가 있으면 추가 (variants와 함께 Shopify에 전달)
+  if (shopifyOptions.length > 0) {
+    shopifyProduct.options = shopifyOptions;
+  }
+
+  return shopifyProduct;
 }
 
 /**
@@ -233,17 +341,40 @@ export async function createProduct(
       };
     }
 
-    // 2. 상품 데이터 변환
-    const shopifyProduct = formatProductForShopify(product);
+    // 2. 카테고리 매칭 (아마존 → Shopify Taxonomy)
+    let shopifyCategoryId: string | undefined = undefined;
+    let shopifyCategoryName: string | undefined = undefined;
+    
+    if (product.category) {
+      const { matchCategoryToShopify } = await import("@/lib/utils/category-matcher");
+      const matchResult = await matchCategoryToShopify(product.category);
+      
+      if (matchResult.success && matchResult.shopifyCategoryId) {
+        shopifyCategoryId = matchResult.shopifyCategoryId;
+        shopifyCategoryName = matchResult.shopifyCategoryName;
+        console.log(`✅ 카테고리 매칭 성공: ${matchResult.shopifyCategoryName} (신뢰도: ${matchResult.confidence?.toFixed(2)})`);
+      } else {
+        console.warn(`⚠️  카테고리 매칭 실패: ${matchResult.error || "알 수 없는 오류"}`);
+      }
+    }
+
+    // 3. 상품 데이터 변환
+    const shopifyProduct = formatProductForShopify(product, shopifyCategoryId, shopifyCategoryName);
     console.log("📦 변환된 상품 데이터:", {
       title: shopifyProduct.title,
       price: shopifyProduct.variants?.[0]?.price,
       images: shopifyProduct.images?.length,
+      category: shopifyCategoryName || "미매칭",
+      product_type: shopifyProduct.product_type,
     });
 
-    // 3. API 요청 함수 정의
+    // 4. API 요청 함수 정의 (REST API)
     const makeRequest = async () => {
-      const url = `${process.env.SHOPIFY_STORE_URL}/admin/api/${process.env.SHOPIFY_API_VERSION}/products.json`;
+      // URL 정리 (https:// 제거, 나중에 추가)
+      let storeUrl = process.env.SHOPIFY_STORE_URL || "";
+      storeUrl = storeUrl.replace(/^https?:\/\//, "");
+      
+      const url = `https://${storeUrl}/admin/api/${process.env.SHOPIFY_API_VERSION}/products.json`;
 
       const response = await fetch(url, {
         method: "POST",
@@ -253,6 +384,18 @@ export async function createProduct(
         },
         body: JSON.stringify({ product: shopifyProduct }),
       });
+
+      // Content-Type 확인 (JSON이 아니면 에러)
+      const contentType = response.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        const textResponse = await response.text();
+        console.error("❌ JSON이 아닌 응답:", textResponse.substring(0, 200));
+        return {
+          success: false,
+          error: `Invalid response: Expected JSON but got ${contentType}. Check SHOPIFY_STORE_URL and access token.`,
+          statusCode: response.status,
+        };
+      }
 
       const responseData = (await response.json()) as
         | ShopifyProductResponse
@@ -280,6 +423,14 @@ export async function createProduct(
 
       // 성공
       const productData = responseData as ShopifyProductResponse;
+      
+      // 카테고리 매칭 정보 로그
+      if (shopifyCategoryName) {
+        console.log(`📝 매칭된 Shopify 카테고리가 product_type에 설정됨: ${shopifyProduct.product_type}`);
+      } else {
+        console.log(`📝 기본 카테고리가 product_type에 설정됨: ${shopifyProduct.product_type}`);
+      }
+      
       return {
         success: true,
         shopifyProductId: productData.product.id,

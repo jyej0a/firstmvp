@@ -48,6 +48,19 @@ export async function POST() {
 
     if (error) {
       console.error("Supabase sync error:", error);
+      
+      // 테이블이 없는 경우 더 명확한 에러 메시지
+      if (error.message?.includes("relation") || error.message?.includes("does not exist") || error.message?.includes("schema cache")) {
+        return NextResponse.json(
+          { 
+            error: "Failed to sync user", 
+            details: "users 테이블이 존재하지 않습니다. Supabase 마이그레이션을 실행해주세요.",
+            hint: "supabase migration up 또는 Supabase Dashboard에서 마이그레이션을 적용하세요."
+          },
+          { status: 500 }
+        );
+      }
+      
       return NextResponse.json(
         { error: "Failed to sync user", details: error.message },
         { status: 500 }

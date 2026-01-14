@@ -42,6 +42,23 @@ export interface ShopifyVariant {
   
   /** 옵션3 */
   option3?: string;
+  
+  /** 무게 (그램 단위, 선택사항) */
+  weight?: number;
+  
+  /** 무게 단위 (기본값: "kg", 선택사항) */
+  weight_unit?: string;
+}
+
+/**
+ * Shopify 상품 옵션 정의
+ */
+export interface ShopifyOption {
+  /** 옵션 이름 (예: "Color", "Size") */
+  name: string;
+  
+  /** 옵션 값 배열 (예: ["Red", "Blue", "Green"]) */
+  values: string[];
 }
 
 /**
@@ -65,6 +82,9 @@ export interface ShopifyProductInput {
   
   /** 이미지 배열 */
   images?: ShopifyImage[];
+  
+  /** 상품 옵션 정의 배열 */
+  options?: ShopifyOption[];
   
   /** 상품 옵션 배열 */
   variants?: ShopifyVariant[];

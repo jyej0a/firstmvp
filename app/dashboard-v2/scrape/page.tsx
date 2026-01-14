@@ -27,9 +27,56 @@ export default function ScrapePage() {
   // 순차 처리 Job ID 상태
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
 
-  // 수집 중인 상품 목록 (draft 상태)
-  const [collectingProducts, setCollectingProducts] = useState<Product[]>([]);
-  const [isLoadingCollectingProducts, setIsLoadingCollectingProducts] = useState(false);
+  // 오늘(KST) 수집 상품 목록 (상태: draft/uploaded/error 모두)
+  const [todayProducts, setTodayProducts] = useState<Product[]>([]);
+  const [isLoadingTodayProducts, setIsLoadingTodayProducts] = useState(false);
+  const [todayProductsError, setTodayProductsError] = useState<string | null>(null);
+  const [currentJobStatus, setCurrentJobStatus] = useState<string | null>(null);
+
+  const safeParseApiResponse = async <T,>(
+    response: Response
+  ): Promise<ApiResponse<T>> => {
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      return (await response.json()) as ApiResponse<T>;
+    }
+
+    const text = await response.text();
+    throw new Error(
+      `서버 응답이 JSON이 아닙니다. (status=${response.status})\n` + text.slice(0, 500)
+    );
+  };
+
+  // 페이지 로드 시 활성 Job 확인 및 복원
+  useEffect(() => {
+    const restoreActiveJob = async () => {
+      console.group('🔄 [Scrape] 활성 Job 복원 시도');
+      
+      try {
+        const response = await fetch('/api/scrape-v2/active');
+        const data = await safeParseApiResponse<any>(response);
+
+        if (response.ok && data.success && data.data) {
+          const activeJob = data.data;
+          console.log(`✅ 활성 Job 발견: ${activeJob.id}`);
+          console.log(`   상태: ${activeJob.status}`);
+          console.log(`   진행: ${activeJob.current_count}/${activeJob.total_target}`);
+          
+          // Job ID 복원
+          setCurrentJobId(activeJob.id);
+          setIsLoading(activeJob.status === 'running');
+        } else {
+          console.log('ℹ️  활성 Job 없음');
+        }
+      } catch (err) {
+        console.error('❌ 활성 Job 복원 실패:', err);
+      } finally {
+        console.groupEnd();
+      }
+    };
+
+    restoreActiveJob();
+  }, []); // 페이지 로드 시 한 번만 실행
 
   // 더미 테스트 스크래핑 (테스트용)
   const handleDummyTest = async () => {
@@ -52,7 +99,7 @@ export default function ScrapePage() {
         }),
       });
 
-      const data: ApiResponse<{ jobId: string; message: string }> = await response.json();
+      const data = await safeParseApiResponse<{ jobId: string; message: string }>(response);
       console.log('📦 API 응답:', data);
 
       if (!response.ok || !data.success || !data.data) {
@@ -101,7 +148,7 @@ export default function ScrapePage() {
         }),
       });
 
-      const data: ApiResponse<{ jobId: string; message: string }> = await response.json();
+      const data = await safeParseApiResponse<{ jobId: string; message: string }>(response);
       console.log('📦 API 응답:', data);
 
       if (!response.ok || !data.success || !data.data) {
@@ -128,87 +175,91 @@ export default function ScrapePage() {
   const handleJobComplete = () => {
     console.log('✅ 순차 처리 작업 완료');
     setIsLoading(false);
+    // Job이 완료/중지되면 currentJobId를 초기화하여 폴링 중지
+    setCurrentJobId(null);
   };
 
 
-  // Job이 시작되면 수집 중인 상품 목록 조회 시작
+  // 오늘(KST) 수집 현황 조회 (Job 상태와 무관하게 계속 누적 표시)
   useEffect(() => {
-    if (!currentJobId) {
-      // Job이 없으면 목록 초기화
-      setCollectingProducts([]);
-      return;
-    }
+    let isActive = true; // cleanup 플래그
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
-    // 즉시 한 번 조회
-    const fetchOnce = async () => {
-      setIsLoadingCollectingProducts(true);
+    const fetchTodayProducts = async () => {
+      if (!isActive) return;
+
+      setIsLoadingTodayProducts(true);
+      setTodayProductsError(null);
+
       try {
-        // 현재 Job에 속한 draft 상품만 조회
-        const response = await fetch(`/api/products?status=draft&jobId=${currentJobId}&limit=100`);
-        const data: ApiResponse<{
+        // 1) Job 상태 확인 (있는 경우에만) - 폴링 간격 결정용
+        if (currentJobId) {
+          const jobResponse = await fetch(`/api/scrape-v2/${currentJobId}`);
+          const jobData = await safeParseApiResponse<any>(jobResponse);
+          if (jobResponse.ok && jobData.success && jobData.data) {
+            const jobStatus = jobData.data.status as string;
+            setCurrentJobStatus(jobStatus);
+          } else {
+            setCurrentJobStatus(null);
+          }
+        } else {
+          setCurrentJobStatus(null);
+        }
+
+        // 2) 오늘(KST) 수집 상품 전체 조회 (상태 모두 포함)
+        const response = await fetch(`/api/products?version=v2&todayKst=true&limit=1000&offset=0`);
+        const data = await safeParseApiResponse<{
           products: Product[];
           total: number;
           limit: number;
           offset: number;
-        }> = await response.json();
+        }>(response);
 
-        if (response.ok && data.success && data.data) {
-          const draftProducts = data.data.products.filter(p => p.status === 'draft');
-          // 깜빡임 방지: 실제로 변경된 경우에만 업데이트
-          setCollectingProducts(prev => {
-            const prevIds = prev.map(p => p.id).sort().join(',');
-            const newIds = draftProducts.map(p => p.id).sort().join(',');
-            if (prevIds !== newIds) {
-              console.log(`📦 수집 중인 상품 업데이트: ${draftProducts.length}개`);
-              return draftProducts;
-            }
-            return prev;
-          });
+        if (!response.ok || !data.success || !data.data) {
+          throw new Error(data.error || '오늘 수집 현황 조회에 실패했습니다.');
         }
+
+        const newProducts = data.data.products;
+        setTodayProducts((prev) => {
+          const prevIds = prev.map((p) => p.id).join(',');
+          const newIds = newProducts.map((p) => p.id).join(',');
+          if (prevIds !== newIds) {
+            console.log(`📦 오늘 수집 현황 업데이트: ${newProducts.length}개`);
+            return newProducts;
+          }
+          return prev;
+        });
       } catch (err) {
-        console.error('❌ 수집 중인 상품 조회 실패:', err);
+        const message = err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다.';
+        console.error('❌ 오늘 수집 현황 조회 실패:', message);
+        setTodayProductsError(message);
       } finally {
-        setIsLoadingCollectingProducts(false);
+        setIsLoadingTodayProducts(false);
+
+        // 3) 다음 폴링 예약 (running이면 10초, 아니면 60초)
+        const nextMs = currentJobStatus === 'running' ? 10_000 : 60_000;
+        if (isActive) {
+          timer = setTimeout(fetchTodayProducts, nextMs);
+        }
       }
     };
 
-    fetchOnce();
+    // 즉시 한 번 조회
+    fetchTodayProducts();
 
-    // 5초마다 자동 새로고침 (uploaded 상태가 되면 자동으로 제거됨)
-    const interval = setInterval(async () => {
-      setIsLoadingCollectingProducts(true);
-      try {
-        // 현재 Job에 속한 draft 상품만 조회
-        const response = await fetch(`/api/products?status=draft&jobId=${currentJobId}&limit=100`);
-        const data: ApiResponse<{
-          products: Product[];
-          total: number;
-          limit: number;
-          offset: number;
-        }> = await response.json();
+    return () => {
+      isActive = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [currentJobId, currentJobStatus]);
 
-        if (response.ok && data.success && data.data) {
-          const draftProducts = data.data.products.filter(p => p.status === 'draft');
-          // 깜빡임 방지: 실제로 변경된 경우에만 업데이트
-          setCollectingProducts(prev => {
-            const prevIds = prev.map(p => p.id).sort().join(',');
-            const newIds = draftProducts.map(p => p.id).sort().join(',');
-            if (prevIds !== newIds) {
-              console.log(`📦 수집 중인 상품 업데이트: ${draftProducts.length}개`);
-              return draftProducts;
-            }
-            return prev;
-          });
-        }
-      } catch (err) {
-        console.error('❌ 수집 중인 상품 조회 실패:', err);
-      } finally {
-        setIsLoadingCollectingProducts(false);
-      }
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [currentJobId]);
+  const todayCounts = (() => {
+    const total = todayProducts.length;
+    const draft = todayProducts.filter((p) => p.status === 'draft').length;
+    const uploaded = todayProducts.filter((p) => p.status === 'uploaded').length;
+    const errorCount = todayProducts.filter((p) => p.status === 'error').length;
+    return { total, draft, uploaded, error: errorCount };
+  })();
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-7xl">
@@ -356,13 +407,12 @@ export default function ScrapePage() {
       </div>
 
       {/* 수집 중인 상품 목록 */}
-      {currentJobId && (
-        <div className="mb-6 p-6 bg-card rounded-none border">
+      <div className="mb-6 p-6 bg-card rounded-none border">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-lg font-semibold mb-1">수집 중인 상품</h2>
+              <h2 className="text-lg font-semibold mb-1">오늘 수집 현황 (KST)</h2>
               <p className="text-sm text-muted-foreground">
-                등록이 완료되면 자동으로 ProductList로 이동합니다.
+                오늘 수집한 상품이 누적(스택)되어 표시됩니다. 완료된 상품은 ProductList에서도 확인할 수 있습니다.
               </p>
             </div>
             <Button
@@ -374,17 +424,36 @@ export default function ScrapePage() {
             </Button>
           </div>
 
-          {isLoadingCollectingProducts ? (
-            <div className="text-center py-8 text-muted-foreground">
-              수집 중인 상품을 불러오는 중...
+          {/* 요약 카운트 */}
+          <div className="mb-4 flex flex-wrap gap-2 text-xs text-muted-foreground">
+            <span className="px-2 py-1 border rounded-none">Total: {todayCounts.total.toLocaleString()}</span>
+            <span className="px-2 py-1 border rounded-none">Draft: {todayCounts.draft.toLocaleString()}</span>
+            <span className="px-2 py-1 border rounded-none">Uploaded: {todayCounts.uploaded.toLocaleString()}</span>
+            <span className="px-2 py-1 border rounded-none">Error: {todayCounts.error.toLocaleString()}</span>
+            <span className="px-2 py-1 border rounded-none">
+              Polling: {currentJobStatus === 'running' ? '10s' : '60s'}
+            </span>
+          </div>
+
+          {todayProductsError && (
+            <div className="mb-4 p-3 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-none">
+              <p className="text-sm text-red-700 dark:text-red-300">
+                ❌ {todayProductsError}
+              </p>
             </div>
-          ) : collectingProducts.length === 0 ? (
+          )}
+
+          {isLoadingTodayProducts ? (
+            <div className="text-center py-8 text-muted-foreground">
+              오늘 수집 현황을 불러오는 중...
+            </div>
+          ) : todayProducts.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               아직 수집된 상품이 없습니다.
             </div>
           ) : (
             <div className="space-y-2 max-h-[400px] overflow-y-auto">
-              {collectingProducts.map((product) => (
+              {todayProducts.map((product) => (
                 <div
                   key={product.id}
                   className="flex items-center gap-4 p-3 border rounded-none hover:bg-muted/30 transition-colors"
@@ -414,7 +483,11 @@ export default function ScrapePage() {
                     <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
                       <span>ASIN: {product.asin}</span>
                       <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded-none">
-                        Draft
+                        {product.status === 'draft'
+                          ? 'Draft'
+                          : product.status === 'uploaded'
+                            ? 'Uploaded'
+                            : 'Error'}
                       </span>
                     </div>
                   </div>
@@ -437,7 +510,7 @@ export default function ScrapePage() {
           )}
 
           {/* ProductList 바로가기 버튼 (하단) */}
-          {collectingProducts.length > 0 && (
+          {todayProducts.length > 0 && (
             <div className="mt-4 pt-4 border-t">
               <Button
                 variant="default"
@@ -449,7 +522,6 @@ export default function ScrapePage() {
             </div>
           )}
         </div>
-      )}
     </div>
   );
 }

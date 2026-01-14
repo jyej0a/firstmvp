@@ -136,15 +136,10 @@ export default function ProductList({
   };
 
   // 1688.com (알리바바 도매) 이미지 검색
-  const handleImageClick = (imageUrl: string) => {
-    // 1688.com 이미지 검색 URL
-    // 외부 이미지 URL을 직접 전달 가능
-    const searchUrl = `https://s.1688.com/youyuan/index.htm?tab=imageSearch&imageAddress=${encodeURIComponent(
-      imageUrl
-    )}`;
-
-    console.log("🔍 1688.com 이미지 검색:", searchUrl);
-    window.open(searchUrl, "_blank", "noopener,noreferrer");
+  const handleImageClick = (sourceUrl: string) => {
+    // 아마존 원본 페이지로 이동
+    console.log("🔗 아마존 원본 페이지 이동:", sourceUrl);
+    window.open(sourceUrl, "_blank", "noopener,noreferrer");
   };
 
   // 마진율 변경 핸들러
@@ -255,6 +250,10 @@ export default function ProductList({
               {version === 'v2' && (
                 <th className="p-3 text-right w-24">무게 (kg)</th>
               )}
+              {/* 옵션 (v2 전용) */}
+              {version === 'v2' && (
+                <th className="p-3 text-left w-32">옵션</th>
+              )}
               {/* 아마존 가격 */}
               <th className="p-3 text-right w-28">아마존 가격</th>
               {/* 마진율 */}
@@ -282,13 +281,13 @@ export default function ProductList({
                   />
                 </td>
 
-                {/* 이미지 (클릭 시 1688.com 검색) */}
+                {/* 이미지 (클릭 시 아마존 원본 페이지 이동) */}
                 <td className="p-3">
                   {product.images[0] ? (
                     <div
-                      onClick={() => handleImageClick(product.images[0])}
+                      onClick={() => handleImageClick(product.sourceUrl)}
                       className="relative w-16 h-16 cursor-pointer hover:opacity-75 transition-opacity"
-                      title="클릭하여 1688.com에서 검색"
+                      title="클릭하여 아마존 원본 페이지 열기"
                     >
                       <Image
                         src={product.images[0]}
@@ -370,6 +369,26 @@ export default function ProductList({
                       </span>
                     ) : (
                       <span className="text-sm text-muted-foreground">-</span>
+                    )}
+                  </td>
+                )}
+
+                {/* 옵션 (v2 전용) */}
+                {version === 'v2' && (
+                  <td className="p-3">
+                    {product.variants && Array.isArray(product.variants) && product.variants.length > 0 ? (
+                      <div className="flex flex-col gap-1">
+                        {product.variants.map((variant, idx) => (
+                          <span
+                            key={idx}
+                            className="text-xs bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 px-2 py-1 rounded-none whitespace-nowrap"
+                          >
+                            {variant}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">-</span>
                     )}
                   </td>
                 )}
