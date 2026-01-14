@@ -102,21 +102,47 @@ export async function startSequentialScraping(
   try {
     const supabase = getServiceRoleClient();
 
-    // 1. Job 생성
-    const { data: job, error: jobError } = await supabase
+    // 1. Job 생성 (scraping_mode 컬럼이 없을 수 있으므로 fallback 처리)
+    const jobData: any = {
+      user_id: userId,
+      search_input: searchInput,
+      status: "pending",
+      total_target: totalTarget,
+      current_count: 0,
+      success_count: 0,
+      failed_count: 0,
+    };
+
+    // scraping_mode 컬럼이 있는지 확인 후 추가
+    // 컬럼이 없으면 에러가 발생하므로, 에러 발생 시 scraping_mode 없이 재시도
+    let job;
+    let jobError;
+
+    // 먼저 scraping_mode 포함하여 시도
+    const { data: jobWithMode, error: errorWithMode } = await supabase
       .from("scraping_jobs")
       .insert({
-        user_id: userId,
-        search_input: searchInput,
-        status: "pending",
-        total_target: totalTarget,
-        current_count: 0,
-        success_count: 0,
-        failed_count: 0,
+        ...jobData,
         scraping_mode: scrapingMode,
       })
       .select()
       .single();
+
+    if (errorWithMode && errorWithMode.message.includes("scraping_mode")) {
+      // scraping_mode 컬럼이 없는 경우, scraping_mode 없이 재시도
+      console.warn("⚠️ scraping_mode 컬럼이 없습니다. 기본값(collect_sync)으로 진행합니다.");
+      const { data: jobWithoutMode, error: errorWithoutMode } = await supabase
+        .from("scraping_jobs")
+        .insert(jobData)
+        .select()
+        .single();
+      
+      job = jobWithoutMode;
+      jobError = errorWithoutMode;
+    } else {
+      job = jobWithMode;
+      jobError = errorWithMode;
+    }
 
     if (jobError || !job) {
       console.error("❌ Job 생성 실패:", jobError);
@@ -175,7 +201,8 @@ async function processSequentialScraping(
       .eq("id", jobId)
       .single();
 
-    const scrapingMode = existingJob?.scraping_mode || "collect_sync";
+    // scraping_mode 컬럼이 없을 수 있으므로 fallback 처리
+    const scrapingMode = (existingJob as any)?.scraping_mode || "collect_sync";
     console.log(`📝 현재 Job 모드: ${scrapingMode}`);
 
     // 2. Job 상태를 'running'으로 변경
