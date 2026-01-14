@@ -22,6 +22,13 @@ export type SourcingType = "US" | "CN";
 export type ProductStatus = "draft" | "uploaded" | "error";
 
 /**
+ * 스크래핑 모드 (Scraping Mode)
+ * - collect_only: 수집만 진행 (DB 저장만)
+ * - collect_sync: 수집 후 Shopify 자동 등록
+ */
+export type ScrapingMode = "collect_only" | "collect_sync";
+
+/**
  * 스크래핑된 원시 데이터 인터페이스
  * 아마존에서 직접 추출한 데이터 (가공 전)
  */

@@ -14,13 +14,13 @@ import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import ScrapingProgress from '@/components/ScrapingProgress';
-import Image from 'next/image';
-import Link from 'next/link';
+import { CheckCircle2, Loader2, XCircle } from 'lucide-react';
 import type { ApiResponse, Product } from '@/types';
 
 export default function ScrapePage() {
   const [searchInput, setSearchInput] = useState('');
   const [targetCount, setTargetCount] = useState<string>(''); // 목표 개수
+  const [isAutoSync, setIsAutoSync] = useState(true); // true = Collect & Sync (기본값)
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
@@ -145,6 +145,7 @@ export default function ScrapePage() {
         body: JSON.stringify({ 
           searchInput,
           totalTarget: finalTargetCount,
+          scrapingMode: isAutoSync ? "collect_sync" : "collect_only",
         }),
       });
 
@@ -361,6 +362,29 @@ export default function ScrapePage() {
               {targetCount ? `${targetCount} items` : '1000 items (default)'}
             </span>
           </div>
+
+          {/* 수집 모드 선택 */}
+          <div className="p-4 bg-muted/50 rounded-none border">
+            <div className="flex items-center justify-between">
+              <div className="flex-1">
+                <Label htmlFor="auto-sync" className="text-base font-semibold cursor-pointer">
+                  Collect & Sync (자동 등록)
+                </Label>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {isAutoSync 
+                    ? "수집된 상품을 즉시 Shopify에 자동 등록합니다"
+                    : "수집만 진행하고, 상품 목록 페이지에서 직접 등록할 수 있습니다"}
+                </p>
+              </div>
+              <Switch
+                id="auto-sync"
+                checked={isAutoSync}
+                onCheckedChange={setIsAutoSync}
+                className="ml-4"
+                disabled={isLoading}
+              />
+            </div>
+          </div>
         </div>
 
         {/* 순차 처리 진행 상황 표시 */}
@@ -412,7 +436,7 @@ export default function ScrapePage() {
             <div>
               <h2 className="text-lg font-semibold mb-1">오늘 수집 현황 (KST)</h2>
               <p className="text-sm text-muted-foreground">
-                오늘 수집한 상품이 누적(스택)되어 표시됩니다. 완료된 상품은 ProductList에서도 확인할 수 있습니다.
+                오늘 수집한 상품이 누적(스택)되어 표시됩니다. ProductList에서 전체 상품을 확인할 수 있습니다.
               </p>
             </div>
             <Button
@@ -425,13 +449,18 @@ export default function ScrapePage() {
           </div>
 
           {/* 요약 카운트 */}
-          <div className="mb-4 flex flex-wrap gap-2 text-xs text-muted-foreground">
-            <span className="px-2 py-1 border rounded-none">Total: {todayCounts.total.toLocaleString()}</span>
-            <span className="px-2 py-1 border rounded-none">Draft: {todayCounts.draft.toLocaleString()}</span>
-            <span className="px-2 py-1 border rounded-none">Uploaded: {todayCounts.uploaded.toLocaleString()}</span>
-            <span className="px-2 py-1 border rounded-none">Error: {todayCounts.error.toLocaleString()}</span>
-            <span className="px-2 py-1 border rounded-none">
-              Polling: {currentJobStatus === 'running' ? '10s' : '60s'}
+          <div className="mb-4 flex flex-wrap gap-2 text-xs">
+            <span className="px-3 py-1.5 bg-gray-100 dark:bg-gray-800 rounded-none font-medium">
+              Total: <span className="text-primary font-bold">{todayCounts.total.toLocaleString()}</span>
+            </span>
+            <span className="px-3 py-1.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 rounded-none font-medium">
+              수집 중: <span className="font-bold">{todayCounts.draft.toLocaleString()}</span>
+            </span>
+            <span className="px-3 py-1.5 bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300 rounded-none font-medium">
+              완료: <span className="font-bold">{todayCounts.uploaded.toLocaleString()}</span>
+            </span>
+            <span className="px-3 py-1.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 rounded-none font-medium">
+              실패: <span className="font-bold">{todayCounts.error.toLocaleString()}</span>
             </span>
           </div>
 
@@ -452,60 +481,67 @@ export default function ScrapePage() {
               아직 수집된 상품이 없습니다.
             </div>
           ) : (
-            <div className="space-y-2 max-h-[400px] overflow-y-auto">
-              {todayProducts.map((product) => (
-                <div
-                  key={product.id}
-                  className="flex items-center gap-4 p-3 border rounded-none hover:bg-muted/30 transition-colors"
-                >
-                  {/* 이미지 */}
-                  <div className="relative w-16 h-16 flex-shrink-0">
-                    {product.images[0] ? (
-                      <Image
-                        src={product.images[0]}
-                        alt={product.title}
-                        fill
-                        className="object-cover rounded-none"
-                        sizes="64px"
-                      />
-                    ) : (
-                      <div className="w-full h-full bg-muted rounded-none flex items-center justify-center">
-                        <span className="text-xs text-muted-foreground">No Image</span>
-                      </div>
-                    )}
-                  </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left py-3 px-4 font-semibold text-muted-foreground">NO</th>
+                    <th className="text-left py-3 px-4 font-semibold text-muted-foreground">ASIN</th>
+                    <th className="text-left py-3 px-4 font-semibold text-muted-foreground">URL</th>
+                    <th className="text-center py-3 px-4 font-semibold text-muted-foreground w-20">완료</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {todayProducts.map((product, index) => (
+                    <tr
+                      key={product.id}
+                      className="hover:bg-muted/30 transition-colors"
+                    >
+                      {/* NO */}
+                      <td className="py-3 px-4 text-muted-foreground font-mono">
+                        {index + 1}
+                      </td>
 
-                  {/* 상품 정보 */}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium line-clamp-1" title={product.title}>
-                      {product.title}
-                    </p>
-                    <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
-                      <span>ASIN: {product.asin}</span>
-                      <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded-none">
-                        {product.status === 'draft'
-                          ? 'Draft'
-                          : product.status === 'uploaded'
-                            ? 'Uploaded'
-                            : 'Error'}
-                      </span>
-                    </div>
-                  </div>
+                      {/* ASIN */}
+                      <td className="py-3 px-4 font-mono text-xs">
+                        {product.asin}
+                      </td>
 
-                  {/* 가격 정보 */}
-                  <div className="text-right flex-shrink-0">
-                    <p className="text-sm font-semibold">
-                      ${product.sellingPrice.toLocaleString('en-US', {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      마진: {product.marginRate}%
-                    </p>
-                  </div>
-                </div>
-              ))}
+                      {/* URL */}
+                      <td className="py-3 px-4">
+                        <a
+                          href={product.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 dark:text-blue-400 hover:underline truncate block max-w-md"
+                          title={product.url}
+                        >
+                          {product.url}
+                        </a>
+                      </td>
+
+                      {/* 완료 상태 */}
+                      <td className="py-3 px-4 text-center">
+                        {product.status === 'uploaded' && (
+                          <div className="flex items-center justify-center">
+                            <CheckCircle2 className="h-5 w-5 text-green-500 animate-in fade-in zoom-in" />
+                          </div>
+                        )}
+                        {product.status === 'draft' && (
+                          <div className="flex items-center justify-center">
+                            <Loader2 className="h-5 w-5 text-blue-500 animate-spin" />
+                          </div>
+                        )}
+                        {product.status === 'error' && (
+                          <div className="flex items-center justify-center">
+                            <XCircle className="h-5 w-5 text-red-500 animate-in fade-in zoom-in" />
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
 

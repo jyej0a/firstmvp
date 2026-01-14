@@ -84,11 +84,14 @@ export async function POST(request: NextRequest) {
 
     // 3. 요청 바디 파싱
     const body = await request.json();
-    const { searchInput, totalTarget } = body;
+    const { searchInput, totalTarget, scrapingMode } = body;
 
     console.log(`📝 입력값: "${searchInput}"`);
     if (totalTarget) {
       console.log(`🎯 목표 개수: ${totalTarget}개`);
+    }
+    if (scrapingMode) {
+      console.log(`📝 수집 모드: ${scrapingMode}`);
     }
 
     // 4. 입력값 검증
@@ -128,6 +131,7 @@ export async function POST(request: NextRequest) {
         userId,
         searchInput,
         totalTarget: totalTarget || 1000,
+        scrapingMode: scrapingMode || "collect_sync",
       });
 
       console.log(`✅ Job 시작 완료: ${jobId}`);

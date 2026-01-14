@@ -22,7 +22,7 @@ import { createProduct } from "@/lib/shopify/client";
 import { scrapeSingleProduct } from "./amazon-scraper";
 import { sendDiscord } from "@/lib/discord";
 import { categorizeError, errorInfoToDbUpdate } from "@/lib/utils/error-handler";
-import type { ScrapedProductRaw, Product } from "@/types";
+import type { ScrapedProductRaw, Product, ScrapingMode } from "@/types";
 
 /**
  * Job 상태 타입
@@ -41,6 +41,7 @@ export interface CreateJobParams {
   userId: string;
   searchInput: string;
   totalTarget?: number; // 기본값: 1000
+  scrapingMode?: ScrapingMode; // 기본값: 'collect_sync'
 }
 
 /**
@@ -55,6 +56,7 @@ export interface JobInfo {
   currentCount: number;
   successCount: number;
   failedCount: number;
+  scrapingMode: ScrapingMode;
   startedAt: string | null;
   completedAt: string | null;
   errorMessage: string | null;
@@ -90,11 +92,12 @@ export async function startSequentialScraping(
   params: CreateJobParams
 ): Promise<string> {
   console.group("🚀 [Sequential Scraper] Job 시작");
-  const { userId, searchInput, totalTarget = 1000 } = params;
+  const { userId, searchInput, totalTarget = 1000, scrapingMode = "collect_sync" } = params;
 
   console.log(`👤 사용자 ID: ${userId}`);
   console.log(`🔍 검색 입력: ${searchInput}`);
   console.log(`🎯 목표 개수: ${totalTarget}개`);
+  console.log(`📝 수집 모드: ${scrapingMode}`);
 
   try {
     const supabase = getServiceRoleClient();
@@ -110,6 +113,7 @@ export async function startSequentialScraping(
         current_count: 0,
         success_count: 0,
         failed_count: 0,
+        scraping_mode: scrapingMode,
       })
       .select()
       .single();
@@ -167,9 +171,12 @@ async function processSequentialScraping(
     // 1. Job 정보 조회 (재개 시 started_at 유지하기 위해)
     const { data: existingJob } = await supabase
       .from("scraping_jobs")
-      .select("status, started_at, current_count")
+      .select("status, started_at, current_count, scraping_mode")
       .eq("id", jobId)
       .single();
+
+    const scrapingMode = existingJob?.scraping_mode || "collect_sync";
+    console.log(`📝 현재 Job 모드: ${scrapingMode}`);
 
     // 2. Job 상태를 'running'으로 변경
     await updateJobStatus(jobId, "running");
@@ -719,7 +726,9 @@ async function processSequentialScraping(
           return;
         }
 
-        // 3-4. Shopify 등록 (재시도 로직 포함)
+        // 3-4. Shopify 등록 (모드에 따라 실행)
+        if (scrapingMode === "collect_sync") {
+          console.log(`🔄 Collect & Sync 모드: Shopify 자동 등록 시작`);
         try {
           if (!savedProductId) {
             throw new Error("저장된 상품 ID를 찾을 수 없습니다");
@@ -833,6 +842,12 @@ async function processSequentialScraping(
           failedCount++; // 실패 카운트 증가
           // Shopify 등록 실패해도 다음 상품 계속 진행
           // Job Item은 'saved' 상태 유지 (나중에 수동 등록 가능)
+        }
+        } else {
+          console.log(`📦 Collect Only 모드: Shopify 등록 건너뜀 (DB 저장만 완료)`);
+          // collect_only 모드에서는 successCount 증가 (DB 저장 성공)
+          successCount++;
+          // Job Item 상태는 'saved'로 유지 (나중에 수동 등록 가능)
         }
 
         // 3-5. 진행 상황 업데이트

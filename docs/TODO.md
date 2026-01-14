@@ -737,6 +737,26 @@ US 타입 기준 마진율로 판매가 자동 계산 (MVP 1.0 범위)
   - [ ] `paused` 상태 UI 표시
   - [ ] 재개 버튼 클릭 시 선택 옵션 모달 표시
 
+### 2.29.5 수집 모드 선택 기능 (01/14, 1일) ✅ 완료 (2026-01-14)
+
+- [x] ScrapingMode 타입 정의 추가 (types/index.ts)
+- [x] DB 마이그레이션 (scraping_mode 컬럼 추가)
+- [x] shadcn Switch 컴포넌트 설치
+- [x] 순차 스크래퍼 로직 수정
+  - [x] CreateJobParams에 scrapingMode 추가
+  - [x] JobInfo에 scrapingMode 추가
+  - [x] Shopify 등록 조건부 실행
+- [x] API 업데이트 (scrapingMode 받아서 Job에 저장)
+- [x] UI 업데이트 (토글 스위치 추가)
+- [x] 문서 업데이트 (PRD.md, TODO.md)
+
+### ✅ 수집 모드 기능 완료 조건
+
+- [x] Collect & Sync 모드: 기존대로 자동 등록됨
+- [x] Collect Only 모드: DB에만 저장되고 상품 목록에서 수동 등록 가능
+- [x] 토글 스위치로 모드 선택 가능
+- [x] 기본값이 Collect & Sync로 설정됨
+
 ### ✅ Phase 2.5 완료 조건
 
 - [x] 순차 처리 Job 시스템 구현 완료 ✅ **2024-12-15 완료**

@@ -49,6 +49,7 @@
 | **CN 타입 가격 계산**           | MVP 1.0 (Phase 2.5) | **Must**     | 타오바오 원가 기반 마진 자동 계산 로직 추가 (공식: `(costPrice + shipping + extra) / (1 - marginRate)`). Phase 2.5에서 구현 예정.                                                           |
 | **스크래핑 요소 추가**          | MVP 1.0 (Phase 2.5) | **Must**     | 리뷰수, 평점 등 추가 요소 수집. Phase 2.5에서 구현 예정.                                                                                                                                    |
 | **수집 중지 및 재개**           | MVP 1.0 (Phase 2.5) | **Must**     | 수집 진행 중 일시 중지 가능, 재개 시 이어서 수집 또는 처음부터 다시 수집 선택 가능. Phase 2.5에서 구현 예정.                                                                                |
+| **수집 모드 선택**              | MVP 1.0 (Phase 2.5) | **Must**     | 수집 시작 전 모드 선택: Collect Only (수집만), Collect & Sync (자동 등록). 기본값은 Collect & Sync. Phase 2.5에서 구현 완료.                                                                |
 | **50개 수집 확장**              | v1.1                | Should       | 30개에서 50개로 수집 확장 및 진행 상황 실시간 표시.                                                                                                                                         |
 | **중국어 이미지 필터링**        | v1.1                | Should       | 이미지에 중국어 텍스트 포함 여부 자동 감지 및 필터링.                                                                                                                                       |
 | **Toast 알림 시스템**           | v1.1                | Nice to Have | 성공/에러/경고 메시지를 사용자 친화적으로 표시.                                                                                                                                             |
@@ -164,6 +165,7 @@
   - `products` 테이블 (기본 상품 정보, 가격, 상태 등)
   - `banned_keywords` 테이블 (금지어 목록)
   - `scraping_jobs` 테이블 (순차 처리 Job 관리, Phase 2.5)
+    - `scraping_mode` TEXT 컬럼 (collect_only | collect_sync, 기본값: collect_sync) - Phase 2.5
   - `scraping_job_items` 테이블 (Job별 상품 아이템, Phase 2.5)
 - **순차 처리 시스템 (Phase 2.5):**
   - Job 기반 비동기 처리 (1분당 1개씩 수집)
