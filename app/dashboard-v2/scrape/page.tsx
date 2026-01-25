@@ -64,9 +64,14 @@ export default function ScrapePage() {
           console.log(`   상태: ${activeJob.status}`);
           console.log(`   진행: ${activeJob.current_count}/${activeJob.total_target}`);
           
-          // Job ID 복원
-          setCurrentJobId(activeJob.id);
-          setIsLoading(activeJob.status === 'running');
+          // 실행 중인 Job만 복원 (paused/completed는 복원하지 않음)
+          if (activeJob.status === 'running') {
+            setCurrentJobId(activeJob.id);
+            setIsLoading(true);
+            console.log('🔄 실행 중인 Job을 복원합니다.');
+          } else {
+            console.log(`ℹ️  Job이 ${activeJob.status} 상태이므로 복원하지 않습니다.`);
+          }
         } else {
           console.log('ℹ️  활성 Job 없음');
         }
@@ -97,7 +102,7 @@ export default function ScrapePage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ 
-          totalTarget: 5, // 테스트용 5개만
+          totalTarget: 30, // 화면 녹화용 30개 (약 90초 소요, 3초 간격)
         }),
       });
 
@@ -187,11 +192,15 @@ export default function ScrapePage() {
   useEffect(() => {
     let isActive = true; // cleanup 플래그
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let isFirstLoad = true; // 첫 로딩 여부
 
     const fetchTodayProducts = async () => {
       if (!isActive) return;
 
-      setIsLoadingTodayProducts(true);
+      // 첫 로딩일 때만 로딩 상태 표시 (깜빡임 방지)
+      if (isFirstLoad) {
+        setIsLoadingTodayProducts(true);
+      }
       setTodayProductsError(null);
 
       try {
@@ -232,12 +241,21 @@ export default function ScrapePage() {
           }
           return prev;
         });
+        
+        // 첫 로딩 완료 표시
+        if (isFirstLoad) {
+          isFirstLoad = false;
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다.';
         console.error('❌ 오늘 수집 현황 조회 실패:', message);
         setTodayProductsError(message);
       } finally {
-        setIsLoadingTodayProducts(false);
+        // 첫 로딩일 때만 로딩 상태 해제 (깜빡임 방지)
+        if (isFirstLoad) {
+          setIsLoadingTodayProducts(false);
+          isFirstLoad = false;
+        }
 
         // 3) 다음 폴링 예약 (running이면 10초, 아니면 60초)
         const nextMs = currentJobStatus === 'running' ? 10_000 : 60_000;
@@ -367,10 +385,10 @@ export default function ScrapePage() {
 
           {/* 수집 모드 선택 */}
           <div className="p-4 bg-muted/50 rounded-none border">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-4">
               <div className="flex-1">
                 <Label htmlFor="auto-sync" className="text-base font-semibold cursor-pointer">
-                  Collect & Sync (자동 등록)
+                  {isAutoSync ? "Collect & Sync (자동 등록)" : "Collect Only (수집만)"}
                 </Label>
                 <p className="text-sm text-muted-foreground mt-1">
                   {isAutoSync 
@@ -378,13 +396,15 @@ export default function ScrapePage() {
                     : "수집만 진행하고, 상품 목록 페이지에서 직접 등록할 수 있습니다"}
                 </p>
               </div>
-              <Switch
-                id="auto-sync"
-                checked={isAutoSync}
-                onCheckedChange={setIsAutoSync}
-                className="ml-4"
-                disabled={isLoading}
-              />
+              <div className="flex items-center gap-2 shrink-0">
+                <Switch
+                  id="auto-sync"
+                  checked={isAutoSync}
+                  onCheckedChange={setIsAutoSync}
+                  disabled={isLoading}
+                  className="data-[state=checked]:bg-blue-600 data-[state=unchecked]:bg-gray-300 dark:data-[state=unchecked]:bg-gray-600"
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -394,7 +414,7 @@ export default function ScrapePage() {
           <div className="mb-4">
             <ScrapingProgress
               jobId={currentJobId}
-              pollingInterval={5000}
+              pollingInterval={1000}
               apiPath="/api/scrape-v2"
               onComplete={handleJobComplete}
             />
@@ -526,7 +546,7 @@ export default function ScrapePage() {
                       <td className="py-3 px-4 text-center">
                         {product.status === 'uploaded' && (
                           <div className="flex items-center justify-center">
-                            <CheckCircle2 className="h-5 w-5 text-green-500 animate-in fade-in zoom-in" />
+                            <CheckCircle2 className="h-5 w-5 text-green-500" />
                           </div>
                         )}
                         {product.status === 'draft' && (
@@ -536,7 +556,7 @@ export default function ScrapePage() {
                         )}
                         {product.status === 'error' && (
                           <div className="flex items-center justify-center">
-                            <XCircle className="h-5 w-5 text-red-500 animate-in fade-in zoom-in" />
+                            <XCircle className="h-5 w-5 text-red-500" />
                           </div>
                         )}
                       </td>

@@ -29,6 +29,7 @@ export default function DashboardV2Layout({
     { href: '/dashboard-v2/margin-rate', label: 'Margin Rate' },
     { href: '/dashboard-v2/editor', label: 'Editor' },
     { href: '/dashboard-v2/history', label: 'History' },
+    { href: '/dashboard-v2/presentation', label: 'Presentation' },
   ];
 
   return (

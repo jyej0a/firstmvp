@@ -28,10 +28,10 @@ export interface PriceCalculationInput {
   /** 타오바오 원가 (CN 타입 전용) */
   costPrice?: number;
 
-  /** 배송비 (CN 타입 전용) */
+  /** 배송비 (US/CN 타입 공통) */
   shippingCost?: number;
 
-  /** 추가 비용/관세 (CN 타입 전용) */
+  /** 추가 비용/관세 (US/CN 타입 공통) */
   extraCost?: number;
 
   /** 희망 마진율 (0-100 사이, 기본값: 40%) */
@@ -80,6 +80,21 @@ export function validatePriceData(
         error: "아마존 가격은 0보다 커야 합니다.",
       };
     }
+
+    // 배송비와 추가 비용은 선택사항이지만, 있다면 0 이상이어야 함
+    if (input.shippingCost !== undefined && input.shippingCost < 0) {
+      return {
+        valid: false,
+        error: "배송비는 0 이상이어야 합니다.",
+      };
+    }
+
+    if (input.extraCost !== undefined && input.extraCost < 0) {
+      return {
+        valid: false,
+        error: "추가 비용은 0 이상이어야 합니다.",
+      };
+    }
   }
 
   // 3. CN 타입 검증 (v1.1)
@@ -111,26 +126,32 @@ export function validatePriceData(
 }
 
 /**
- * US 타입 판매가 계산
+ * US 타입 판매가 계산 (v1.2 - 배송비 및 추가 비용 반영)
  *
- * 공식: amazonPrice × (1 + marginRate / 100)
+ * 공식: (amazonPrice + shippingCost + extraCost) / (1 - marginRate / 100)
  *
  * @param amazonPrice - 아마존 판매 가격
+ * @param shippingCost - 배송비 (기본값: 0)
+ * @param extraCost - 추가 비용/관세 (기본값: 0)
  * @param marginRate - 희망 마진율 (0-100)
  * @returns 최종 판매 가격
  *
  * @example
- * const sellingPrice = calculateSellingPriceUS(29.99, 40);
- * // sellingPrice = 41.986 (약 $42)
+ * const sellingPrice = calculateSellingPriceUS(29.99, 2.0, 1.0, 40);
+ * // sellingPrice = 54.98
  */
 export function calculateSellingPriceUS(
   amazonPrice: number,
-  marginRate: number
+  marginRate: number,
+  shippingCost: number = 0,
+  extraCost: number = 0
 ): number {
   // 입력값 검증
   const validation = validatePriceData({
     sourcingType: "US",
     amazonPrice,
+    shippingCost,
+    extraCost,
     marginRate,
   });
 
@@ -138,8 +159,14 @@ export function calculateSellingPriceUS(
     throw new Error(validation.error);
   }
 
-  // 공식: amazonPrice × (1 + marginRate / 100)
-  const sellingPrice = amazonPrice * (1 + marginRate / 100);
+  // 마진율이 100%이면 나누기 0 오류 발생 방지
+  if (marginRate >= 100) {
+    throw new Error("마진율은 100% 미만이어야 합니다.");
+  }
+
+  // 공식: (amazonPrice + shippingCost + extraCost) / (1 - marginRate / 100)
+  const totalCost = amazonPrice + shippingCost + extraCost;
+  const sellingPrice = totalCost / (1 - marginRate / 100);
 
   // 소수점 둘째 자리까지 반올림
   return Math.round(sellingPrice * 100) / 100;
@@ -239,7 +266,9 @@ export function calculatePrice(
       }
       sellingPrice = calculateSellingPriceUS(
         input.amazonPrice,
-        input.marginRate
+        input.marginRate,
+        input.shippingCost || 0,
+        input.extraCost || 0
       );
     } else {
       // CN 타입

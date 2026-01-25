@@ -200,9 +200,9 @@ async function processDummyScraping(
           })
           .eq("id", jobId);
 
-        // 5초 대기 (테스트용, 실제는 60초)
+        // 3초 대기 (화면 녹화용, 실제는 60초)
         // 대기 중에도 취소 상태 체크 (1초마다)
-        const waitTime = 5000; // 5초
+        const waitTime = 3000; // 3초 (화면 녹화용으로 더 빠르게)
         const checkInterval = 1000; // 1초
         const totalChecks = Math.ceil(waitTime / checkInterval);
         
